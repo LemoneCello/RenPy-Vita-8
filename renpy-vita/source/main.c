@@ -195,6 +195,12 @@ int main(int argc, char* argv[])
     /*We don't need to disable back-touchpad here as this is implemented by
     SDL_HINT_VITA_TOUCH_MOUSE_DEVICE default hint setting. At least as of time of writing this.*/
 
+    /* Front panel only. SDL 2.32 leaves the touch-to-mouse device at none
+       when this hint is unset (its callback ignores a NULL hint), so touches
+       never became mouse events and Ren'Py ignored the touchscreen. SDL reads
+       unset hints from the environment. */
+    SDL_setenv("SDL_HINT_VITA_TOUCH_MOUSE_DEVICE", "0", 0);
+
     /* Load Modules */
     sceKernelLoadStartModule("vs0:sys/external/libfios2.suprx", 0, NULL, 0, NULL, NULL);
     sceKernelLoadStartModule("vs0:sys/external/libc.suprx", 0, NULL, 0, NULL, NULL);
