@@ -10,6 +10,8 @@
 #include <psp2/kernel/processmgr.h>
 #include <psp2/vshbridge.h> 
 #include <gpu_es4/psp2_pvr_hint.h>
+#include <psp2/io/stat.h>
+#include <psp2/kernel/threadmgr.h>
 
 #define MAX_PATH 256
 
@@ -105,6 +107,30 @@ void show_error_and_exit(const char* message)
     Py_Exit(1);
 }
 
+/* Debugging aid: when ux0:data/renpy_hangdump appears, crash on purpose so
+ * the system writes a core dump (ux0:data/psp2core-*.psp2dmp) holding every
+ * thread's registers. That shows where a hung app is stuck, even inside C
+ * code holding Python's GIL. The file is deleted first, so it fires once. */
+static int hangdump_thread(SceSize args, void *argp)
+{
+    SceIoStat stat;
+    for (;;) {
+        sceKernelDelayThread(1000 * 1000);
+        if (sceIoGetstat("ux0:data/renpy_hangdump", &stat) >= 0) {
+            sceIoRemove("ux0:data/renpy_hangdump");
+            *(volatile int *) 0 = 0;
+        }
+    }
+    return 0;
+}
+
+static void start_hangdump_thread(void)
+{
+    SceUID thid = sceKernelCreateThread("renpy_hangdump", hangdump_thread, 0x10000100 + 0xA0, 0x1000, 0, 0, NULL);
+    if (thid >= 0)
+        sceKernelStartThread(thid, 0, NULL);
+}
+
 int main(int argc, char* argv[])
 {
     PVRSRV_PSP2_APPHINT hint;
@@ -114,6 +140,8 @@ int main(int argc, char* argv[])
 
     Py_NoSiteFlag = 1;
     Py_OptimizeFlag = 2;
+
+    start_hangdump_thread();
 
     /* Ren'Py is a bit CPU heavy. Increase CPU clocks */
     scePowerSetArmClockFrequency(444);
