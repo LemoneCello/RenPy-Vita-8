@@ -87,6 +87,8 @@ target_link_libraries("${ELF}"
   SceAvPlayer_stub
   SceJpeg_stub_weak
   SceKernelDmacMgr_stub_weak
+  SceVideodec_stub_weak
+  SceCodecEngine_stub_weak
   ScePower_stub
   SceDisplay_stub
   SceCtrl_stub
