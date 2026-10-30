@@ -30,8 +30,7 @@ The eboot is built once and is the same for every game. It takes two commands, r
 
 ```
 uv run RenPy-Vita-8/pipeline/vita_toolchain.py
-uv run RenPy-Vita-8/pipeline/vita_port_build.py --label zc --worktree renpy-vita \
-    --ref renpy-8=vita-perf --ref pygame_sdl2=vita-perf
+uv run RenPy-Vita-8/pipeline/vita_port_build.py --label zc
 ```
 
 **`vita_toolchain.py`** sets up everything in `build/toolchain/`, with pinned versions and checksums. A full run took under 7 minutes on 32 cores (longer with fewer; most of it is FFmpeg and CPython); reruns skip finished steps.
@@ -52,7 +51,7 @@ uv run RenPy-Vita-8/pipeline/vita_port_build.py --label zc --worktree renpy-vita
 
 The patches are in `patches/`. `--from STEP` redoes a step and everything after it. `--dir` builds somewhere else, and `VITA_TOOLCHAIN` points `vita_port_build.py` at it.
 
-**`vita_port_build.py`** copies `renpy-vita/` and the `renpy-8` and `pygame_sdl2` submodules (branch `vita-perf`) into `build/toolchain/port-work/<label>/` and runs Cython. It then compiles and links them into `build/port/<label>/`, which holds `eboot.bin` and `lib/python311.zip`. Rebuilds are incremental. After changing a library in the toolchain, delete `build/toolchain/port-work/<label>/renpy-vita/build/eboot.elf`; otherwise ninja doesn't notice the change and doesn't relink.
+**`vita_port_build.py`** copies `renpy-vita/` and the `renpy-8` and `pygame_sdl2` submodules into `build/toolchain/port-work/<label>/` and runs Cython. It takes the commits your checkout has: RenPy-Vita-8's `HEAD` and the submodule commits it records. `--ref renpy-8=BRANCH` picks another branch or commit, and `--worktree renpy-8` builds from the working tree, including uncommitted changes. It then compiles and links them into `build/port/<label>/`, which holds `eboot.bin` and `lib/python311.zip`. Rebuilds are incremental. After changing a library in the toolchain, delete `build/toolchain/port-work/<label>/renpy-vita/build/eboot.elf`; otherwise ninja doesn't notice the change and doesn't relink.
 
 ## Running the pipeline
 

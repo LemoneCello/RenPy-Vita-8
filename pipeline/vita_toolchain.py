@@ -315,8 +315,7 @@ def main():
         marker.write_text(recipe)
 
     print(f"\nToolchain ready in {tc.root}. Build the eboot with:\n"
-          f"  uv run RenPy-Vita-8/pipeline/vita_port_build.py --label zc --worktree renpy-vita "
-          f"--ref renpy-8=vita-perf --ref pygame_sdl2=vita-perf")
+          f"  uv run RenPy-Vita-8/pipeline/vita_port_build.py --label zc")
 
 
 if __name__ == "__main__":

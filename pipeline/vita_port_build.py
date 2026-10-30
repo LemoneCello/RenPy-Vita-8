@@ -10,15 +10,19 @@ are rewritten, so later builds recompile only what changed), Cython generates
 the C modules, and CMake/Ninja links them with CPython, SDL2 (PVR) and the
 other libraries into eboot.bin.
 
-Sources come from git refs (default: the v0.2.1 commits) or, with
-`--worktree REPO`, from that repo's working tree as it is (RenPy-Vita-8's renpy-vita/ and its
-submodules, uncommitted changes included). Our changes live on the branches
-named vita-perf in RenPy-Vita-8 and its renpy-8 submodule.
+Sources come from git refs or, with `--worktree REPO`, from that repo's
+working tree as it is (RenPy-Vita-8's renpy-vita/ and its submodules,
+uncommitted changes included). By default renpy-vita/ comes from
+RenPy-Vita-8's HEAD and the renpy-8 and pygame_sdl2 submodules from the
+commits that HEAD records for them: what a fresh clone of the vita-perf
+branch has checked out. `--ref REPO=REF` picks another commit or branch; a
+branch that only exists on the remote (a fresh clone has no local vita-perf
+branches in its submodules) is taken from origin/.
 
-Run from the workspace: needs the toolchain set up in build/toolchain/ (see
-README.md, "Building the eboot"): VitaSDK, the PVR_PSP2 SDK files, SDL2 with VIDEO_VITA_PVR, FreeType
-with HarfBuzz, Grimiku's cpython-vita, and a host Python 3.11 with Cython
-0.29.37 and `future`.
+Run from the workspace: needs the toolchain in build/toolchain/
+(vita_toolchain.py; see README.md, "Building the eboot").
+
+  uv run RenPy-Vita-8/pipeline/vita_port_build.py --label zc
 
 Output (build/port/<label>/): eboot.bin, lib/python311.zip, renpy/common/,
 renpy.py, the same layout as the port's release zip.
@@ -39,8 +43,29 @@ TOOLCHAIN = Path(os.environ.get("VITA_TOOLCHAIN") or WORK / "build/toolchain").r
 VITASDK = TOOLCHAIN / "vitasdk"
 HOSTPY = TOOLCHAIN / "hostpy/bin"
 
-# The v0.2.1 commits of the submodules and the port repo itself.
-DEFAULT_REFS = {"renpy-8": "c28b5086b", "pygame_sdl2": "f271acb", "renpy-vita": "HEAD"}
+# The port's v0.2.1 release, for building the stock port:
+# --ref renpy-8=c28b5086b --ref pygame_sdl2=f271acb --ref renpy-vita=<v0.2.1>
+V021_REFS = {"renpy-8": "c28b5086b", "pygame_sdl2": "f271acb"}
+
+
+def recorded_refs():
+    """renpy-vita at RenPy-Vita-8's HEAD, and the submodule commits HEAD records."""
+    refs = {"renpy-vita": "HEAD"}
+    for name in ("renpy-8", "pygame_sdl2"):
+        tree = subprocess.run(["git", "-C", PORT, "ls-tree", "HEAD", name],
+                              check=True, capture_output=True, text=True).stdout.split()
+        refs[name] = tree[2]
+    return refs
+
+
+def resolve(repo, ref):
+    """`ref` as a commit, falling back to origin/`ref` for remote-only branches."""
+    for candidate in (ref, f"origin/{ref}"):
+        r = subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"{candidate}^{{commit}}"],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            return r.stdout.strip()
+    sys.exit(f"{repo.name}: no commit or branch {ref!r} (try `git -C {repo} fetch`)")
 
 # GCC 14+ turns these old-C warnings into errors; the port's code (and the
 # Cython 0.29 output) relies on them, and VitaSDK headers lack a few
@@ -86,7 +111,7 @@ def export(name, ref, worktree, dest, scratch):
         if source.exists():
             shutil.rmtree(source)
         source.mkdir(parents=True)
-        archive = subprocess.run(["git", "-C", repo, "archive", ref] + (["renpy-vita"] if name == "renpy-vita" else []),
+        archive = subprocess.run(["git", "-C", repo, "archive", resolve(repo, ref)] + (["renpy-vita"] if name == "renpy-vita" else []),
                                  check=True, capture_output=True).stdout
         subprocess.run(["tar", "x", "-C", source], input=archive, check=True)
         if name == "renpy-vita":
@@ -110,12 +135,12 @@ def main():
     ap.add_argument("--worktree", action="append", default=[], choices=["renpy-8", "pygame_sdl2", "renpy-vita", "all"],
                     help="build this repo from its working tree instead of a git ref (repeatable)")
     ap.add_argument("--ref", action="append", default=[], metavar="REPO=REF",
-                    help="git ref for renpy-8, pygame_sdl2 or renpy-vita (default: the v0.2.1 commits)")
+                    help="git ref for renpy-8, pygame_sdl2 or renpy-vita (default: what RenPy-Vita-8's HEAD records)")
     ap.add_argument("--heap-mb", type=int, default=250, help="newlib heap size (port default 180; see vita_eboot.py)")
     ap.add_argument("--jobs", type=int, default=os.cpu_count())
     args = ap.parse_args()
 
-    refs = dict(DEFAULT_REFS)
+    refs = recorded_refs()
     for item in args.ref:
         name, _, ref = item.partition("=")
         if name not in refs:
