@@ -13,7 +13,7 @@ dir = "MyGame-1.0-pc/game"        # the PC release's game/ directory
 renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs vita_story.py)
 
 [build]
-port_build = "build/port/zc"      # vita_port_build.py output
+# port_build = "build/port/vita"  # the eboot (vita_port_build.py's default output)
 # root = "build/games"            # where outputs go
 
 # --variant slice: a quick test build with only some folders, plus whatever

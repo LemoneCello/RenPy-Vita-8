@@ -22,7 +22,7 @@ branches in its submodules) is taken from origin/.
 Run from the workspace: needs the toolchain in build/toolchain/
 (vita_toolchain.py; see README.md, "Building the eboot").
 
-  uv run RenPy-Vita-8/pipeline/vita_port_build.py --label zc
+  uv run RenPy-Vita-8/pipeline/vita_port_build.py              # into build/port/vita/
 
 Output (build/port/<label>/): eboot.bin, lib/python311.zip, renpy/common/,
 renpy.py, the same layout as the port's release zip.
@@ -131,7 +131,7 @@ def flatten_into(src, dest, pattern):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--label", default="stock", help="names the work and output folders (default: stock)")
+    ap.add_argument("--label", default="vita", help="names the work and output folders (default: vita)")
     ap.add_argument("--worktree", action="append", default=[], choices=["renpy-8", "pygame_sdl2", "renpy-vita", "all"],
                     help="build this repo from its working tree instead of a git ref (repeatable)")
     ap.add_argument("--ref", action="append", default=[], metavar="REPO=REF",

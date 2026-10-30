@@ -39,7 +39,7 @@ Settings file (TOML):
   renpy = "path"           # the PC release's base directory (for vita_story)
 
   [build]
-  port_build = "build/port/zc"
+  port_build = "build/port/vita"  # optional; vita_port_build.py's default output
   root = "build/games"     # optional
 
   [slice]                  # for --variant slice
@@ -67,7 +67,7 @@ def plan(cfg, variant, vpk):
     build = cfg.get("build", {})
     title_id = game["title_id"]
     root = Path(build.get("root", "build/games")) / title_id / variant
-    port_build = build.get("port_build", "build/port/zc")
+    port_build = build.get("port_build", "build/port/vita")
     extra = {name: list(v.get("args", [])) for name, v in cfg.get("stages", {}).items()}
 
     d = {
