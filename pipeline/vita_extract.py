@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["rich"]
 # ///
 """Extract stage: pull the files a Vita build needs out of a game's .rpa.
 
@@ -39,7 +39,7 @@ import sys
 from collections import Counter
 from pathlib import Path, PurePosixPath
 
-from vita_common import extract_entry, read_rpa_index
+from vita_common import extract_entry, progress, read_rpa_index
 
 VIDEO_EXTS = {".webm", ".mp4", ".ogv", ".mkv", ".avi", ".mpg", ".mpeg", ".m4v"}
 SCRIPT_EXTS = {".rpy", ".rpyc", ".rpym", ".rpymc"}
@@ -238,8 +238,8 @@ def main(argv):
 
     archive_mtime = Path(archive).stat().st_mtime
     kept = 0
-    with open(archive, "rb") as a:
-        for i, n in enumerate(sorted(selected), 1):
+    with open(archive, "rb") as a, progress("Extracting", total=len(selected)) as bar:
+        for n in sorted(selected):
             off, length, prefix = index[n]
             dest = (args.videos if n in videos else args.out) / n
             try:
@@ -251,9 +251,8 @@ def main(argv):
                 kept += 1
             else:
                 extract_entry(a, off, length, prefix, dest)
-            if i % 200 == 0 or i == len(selected):
-                print(f"\r  extracted {i}/{len(selected)}", end="", flush=True)
-    print(f"\n  {kept} unchanged from an earlier run")
+            bar.advance(1, current=n)
+    print(f"  {kept} unchanged from an earlier run")
 
     for path, dest in loose:
         try:

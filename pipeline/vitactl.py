@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["rich"]
 # ///
 """Drive the Vita through vitacompanion (commands on :1338, FTP on :1337).
 
@@ -32,6 +32,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path, PurePosixPath
+
+from vita_common import progress
 
 HOST = os.environ.get("VITA_HOST", "10.42.0.37")
 CMD_PORT, FTP_PORT = 1338, 1337
@@ -220,7 +222,7 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False):
         return
 
     made = set()
-    with ftp() as f:
+    with ftp() as f, progress("Uploading", total=total, unit="bytes") as bar:
         for rel, path, digest, _ in uploads:
             parent = PurePosixPath(rel).parent
             for d in reversed([parent] + list(parent.parents)):
@@ -232,11 +234,11 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False):
                     pass
                 made.add(str(d))
             with open(path, "rb") as src:
-                f.storbinary(f"STOR {remote(f'{remote_dir}/{rel}')}", src)
+                f.storbinary(f"STOR {remote(f'{remote_dir}/{rel}')}", src,
+                             callback=lambda block, rel=rel: bar.advance(len(block), current=rel))
             manifest[rel] = digest
             manifest_path.parent.mkdir(parents=True, exist_ok=True)
             manifest_path.write_text(json.dumps(manifest, indent=0, sort_keys=True))
-            print(f"  uploaded {rel}")
 
     if deletes:
         with ftp() as f:

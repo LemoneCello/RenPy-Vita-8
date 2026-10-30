@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["rich"]
 # ///
 """Video stage: re-encode a game's movies for the Vita port.
 
@@ -67,8 +67,10 @@ import re
 import shutil
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+
+from vita_common import progress
 
 VIDEO_EXTS = {".webm", ".mp4", ".ogv", ".mkv", ".avi", ".mpg", ".mpeg", ".m4v"}
 
@@ -267,10 +269,10 @@ def main(argv):
 
     print(f"{len(expected)} videos, {len(jobs)} to encode at {size[0]}x{size[1]}, {len(stale)} stale removed")
     failed = 0
-    with ThreadPoolExecutor(args.jobs) as pool:
+    with ThreadPoolExecutor(args.jobs) as pool, progress("Encoding movies", total=len(jobs)) as bar:
         futures = [pool.submit(encode, src, dest, size, args.crf, args.preset, args.profile, repeat_of(src))
                    for src, dest in jobs]
-        for i, fut in enumerate(futures, 1):
+        for fut in as_completed(futures):
             src, ok, err = fut.result()
             name = src.relative_to(args.src).as_posix()
             if ok:
@@ -278,10 +280,8 @@ def main(argv):
             else:
                 failed += 1
                 old_repeats.pop(name, None)
-                print(f"\n  FAILED {src}: {err}")
-            print(f"\r  encoded {i}/{len(jobs)}", end="", flush=True)
-    if jobs:
-        print()
+                bar.log(f"  FAILED {src}: {err}")
+            bar.advance(1, current=name)
     names_now = {src.relative_to(args.src).as_posix() for src, _dest in candidates}
     recorded = {n: k for n, k in sorted(old_repeats.items()) if n in names_now and k != 1}
     args.dest.mkdir(parents=True, exist_ok=True)

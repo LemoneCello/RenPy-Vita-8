@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["rich"]
 # ///
 """Toolchain stage: set up everything vita_port_build.py needs to build the eboot.
 
@@ -37,13 +37,15 @@ delete build/toolchain/port-work/<label>/renpy-vita/build/eboot.elf).
 
 import argparse
 import hashlib
-import inspect
 import os
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 from pathlib import Path
+
+from vita_common import progress
 
 HERE = Path(__file__).resolve().parent
 PATCHES = HERE / "patches"
@@ -90,6 +92,87 @@ CPYTHON = ("https://github.com/Grimiku/cpython-vita", "5dd178c51a7c844ba50279aa4
 CFLAGS = "-std=gnu11 -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types"
 CXXFLAGS = "-std=gnu++11 -Wno-error=implicit-function-declaration -Wno-error=int-conversion -Wno-error=incompatible-pointer-types"
 
+# CMake options per library (besides toolchain file, prefix and Release).
+# vdpm's recipe for libjpeg-turbo, but with SIMD (NEON): JPEG decoding ~40% faster.
+LIBJPEG_FLAGS = ["-DENABLE_SHARED=FALSE", "-DWITH_SIMD=TRUE", "-DWITH_TOOLS=FALSE"]
+# A drop-in libz.a (zlib API, NEON inflate/adler32/slide_hash). Runtime CPU
+# detection can't work on the Vita (no /proc, no getauxval), and ACLE CRC32
+# is ARMv8, which the Cortex-A9 lacks.
+ZLIB_FLAGS = ["-DZLIB_COMPAT=ON", "-DZLIB_ENABLE_TESTS=OFF", "-DZLIBNG_ENABLE_TESTS=OFF", "-DWITH_GTEST=OFF",
+              "-DBUILD_SHARED_LIBS=OFF", "-DWITH_RUNTIME_CPU_DETECTION=OFF", "-DWITH_ACLE=OFF"]
+SDL2_FLAGS = ["-DSDL_TEST=OFF", "-DVIDEO_VITA_PVR=ON", f"-DCMAKE_C_FLAGS={CFLAGS}"]
+# vdpm's recipe, but without SDL_image's built-in stb_image, which otherwise
+# decodes PNG and JPEG (far slower than libpng/libjpeg-turbo).
+SDL2_IMAGE_FLAGS = ["-DCMAKE_POSITION_INDEPENDENT_CODE=OFF", "-DBUILD_SHARED_LIBS=OFF", "-DSDL2IMAGE_SAMPLES=OFF",
+                    "-DSDL2IMAGE_WEBP=ON", "-DSDL2IMAGE_DEPS_SHARED=OFF", "-DSDL2IMAGE_AVIF=OFF", "-DSDL2IMAGE_TIF=OFF",
+                    "-DSDL2IMAGE_BACKEND_STB=OFF", f"-DCMAKE_C_FLAGS={CFLAGS}", f"-DCMAKE_CXX_FLAGS={CXXFLAGS}"]
+HARFBUZZ_FLAGS = ["-DHB_HAVE_FREETYPE=ON", f"-DCMAKE_C_FLAGS={CFLAGS}", f"-DCMAKE_CXX_FLAGS={CXXFLAGS}"]
+CPYTHON_CONFIGURE = ["--build=x86_64-pc-linux-gnu", "--host=arm-vita-eabi", "--with-build-python=python3.11",
+                     "--disable-test-modules", "--with-ensurepip=no", "--disable-ipv6", "CONFIG_SITE=config.site",
+                     "LDFLAGS=-lpthread",
+                     "CFLAGS=-std=gnu11 -Wno-error=implicit-function-declaration -Wno-error=int-conversion "
+                     "-Wno-error=incompatible-pointer-types -Wl,-q,-z,nocopyreloc",
+                     "CPPFLAGS=-Wl,-q,-z,nocopyreloc"]
+# -O2: the default build here isn't optimised for speed.
+CPYTHON_OPT = "OPT=-DNDEBUG -g -fwrapv -O2 -Wall"
+
+# What each step's result depends on, besides its patch files (STEP_PATCHES):
+# a step is redone when any of these change. Bump RECIPE_REVISION when a step
+# changes in a way these don't capture.
+RECIPE_REVISION = 1
+STEP_INPUTS = {
+    "vitasdk": (VDPM, VITASDK_CHANNEL),
+    "packages": (PACKAGES,),
+    "pvr": (PVR_REPO, PVR_STUBS),
+    "hostpy": (CYTHON,),
+    "libjpeg": (LIBJPEG, LIBJPEG_FLAGS),
+    "zlib": (ZLIBNG, ZLIB_FLAGS),
+    "sdl2": (SDL2, SDL2_FLAGS),
+    "sdl2_image": (SDL2_IMAGE, SDL2_IMAGE_PKGCONFIG, SDL2_IMAGE_FLAGS),
+    "harfbuzz": (HARFBUZZ, HARFBUZZ_FLAGS),
+    "ffmpeg": (FFMPEG,),
+    "cpython": (CPYTHON, CPYTHON_CONFIGURE, CPYTHON_OPT),
+}
+STEP_PATCHES = {
+    "sdl2": ["sdl2-2.32.8-vita-pvr-ime.patch", "sdl2-2.32.8-vita-stdio-buffer.patch"],
+    "sdl2_image": ["sdl2_image-2.8.12-jpeg-rgba.patch", "sdl2_image-2.8.12-vita-hw-jpeg.patch"],
+    "harfbuzz": ["harfbuzz-hb-ft-static-face-deadlock.patch"],
+    "ffmpeg": ["ffmpeg-9.0.2-vita-build.sh"],
+    "cpython": ["cpython-vita-timed-waits.patch", "cpython-vita-scandir-d-type.patch"],
+}
+
+# Fingerprints the first version of this script (2026-10-30) wrote, each with
+# the fingerprint the same recipe has now: a toolchain built by that version
+# counts as done while the step's recipe is still that one.
+LEGACY_RECIPES = {
+    "vitasdk": ("d85b4d0b58b48440f06f13c309f2f8ac472f115082f514ba6b7a3d623bd8cfb0",
+                "a395034e9de93eda3d776945705907ccdf7696394c013951cd37cca4cc6b4e65"),
+    "packages": ("f4f413cc97bc92b11eb7214f042d68f5103ae77b40954c1fd7933ddac450daba",
+                 "477792cedd1c2add290ff4dc6a7221cd4737e4f3eab218c8f3156565fb10b76e"),
+    "pvr": ("ab32c913f19abb2b7ecde5a58eb534f7b4953d804226f1652531da0efbaa1986",
+            "5e47e7c5dc196b3e024573b71b087fd8276d142614a16e7a0acb0f651df25a31"),
+    "hostpy": ("e179a387a43568644f90c57d3f45261dc01718086cd44d70db442664b0070bc3",
+               "81ea8035a5b537ce90e7d0f00ddece630bbff4d0735f02617d82cb61e38cd8ab"),
+    "libjpeg": ("e52da5e83e30b2495f1d9785f73a02e27c97db52f834d9d0330eebffe33ae8ea",
+                "5450d99acd21e6dc3bb9419cbfda43446682084135f70e6af5150d8e17dfb8df"),
+    "zlib": ("90141060dbcedc38c7c6ecf3341ca5aec615ac213af4a805dda2382961f63356",
+             "968d77ab31aa6222f919d41b4954798e375cc9bdee9cc9362a064bdc9bbd1a6e"),
+    "sdl2": ("c8ee8e230eff3d2bf2179903a21cd4f54586a27c6ead528b307db2b462c5653b",
+             "879cc81f944e60d8422ecdf1e86ecb925d4f1969c1151a867cdc9e2ac8d2de28"),
+    "sdl2_image": ("f54446c6770d1240dc42409c3110c3777a95f2bbfbc11141520982057e6680cd",
+                   "41d66293bae398abd6ed0f3c380dea3aaf33ae9813cfa37bc85e4025004bc68c"),
+    "harfbuzz": ("82e33a9dfda2b3f230a521bb822b830fe7bd62a8250c7abb42e072942bd6617a",
+                 "c35d917e28b1a7046dd13f44174286b2aa8658e48169e696408a79424f3cf48a"),
+    "ffmpeg": ("ab0d8164cfd0ec779b8562d9f81628ad0c53af5fd9041991768f7f0c785428a1",
+               "dbc1ab733a8b7218f01c48b1c587d2058a7bc10eedad401dadf283b13c781c8e"),
+    "cpython": ("7d841caa62b64d6f5c3875feb6e49b40d1fbb1cea52aec4b57c48e00467c73a3",
+                "091c32c6cd98376f84cff8e764d27e07895b46cdfba316943a47f507024cd96f"),
+}
+
+
+class StepFailed(Exception):
+    pass
+
 
 class Toolchain:
 
@@ -99,26 +182,39 @@ class Toolchain:
         self.downloads = self.root / "downloads"
         self.sdk = self.root / "vitasdk"
         self.jobs = str(jobs)
+        self.logs = self.root / "logs"
+        self.step = self.log = self.status = None
+        self.warnings = [ ]
         self.env = dict(os.environ, VITASDK=str(self.sdk),
                         PATH=f"{self.root / 'hostpy/bin'}:{self.sdk / 'bin'}:{os.environ['PATH']}")
 
     # Helpers.
 
     def run(self, cmd, cwd=None, **kwargs):
-        print("+", cmd if isinstance(cmd, str) else " ".join(str(c) for c in cmd), f"(in {cwd})" if cwd else "", flush=True)
-        subprocess.run(cmd, cwd=cwd, env=self.env, check=True, shell=isinstance(cmd, str), **kwargs)
+        """Runs a command with its output in the step's log."""
+        line = cmd if isinstance(cmd, str) else " ".join(str(c) for c in cmd)
+        if self.status:
+            self.status.update(f"{self.step}: {line.split()[0].rsplit('/', 1)[-1]}")
+        with open(self.log, "a") as log:
+            log.write(f"+ {line}" + (f" (in {cwd})" if cwd else "") + "\n")
+            log.flush()
+            rc = subprocess.run(cmd, cwd=cwd, env=self.env, shell=isinstance(cmd, str),
+                                stdout=log, stderr=subprocess.STDOUT, **kwargs).returncode
+        if rc:
+            raise StepFailed(f"{line} failed ({rc})")
 
     def fetch(self, url, sha256, name=None):
         path = self.downloads / (name or url.rsplit("/", 1)[1])
         if not path.exists():
             self.downloads.mkdir(parents=True, exist_ok=True)
-            print(f"downloading {url}", flush=True)
+            if self.status:
+                self.status.update(f"{self.step}: downloading {path.name}")
             tmp = path.with_suffix(".part")
             urllib.request.urlretrieve(url, tmp)
             tmp.replace(path)
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         if digest != sha256:
-            sys.exit(f"{path}: SHA-256 {digest}, expected {sha256} (delete it to download again)")
+            raise StepFailed(f"{path}: SHA-256 {digest}, expected {sha256} (delete it to download again)")
         return path
 
     def unpack(self, archive, name):
@@ -150,17 +246,17 @@ class Toolchain:
 
     def patch(self, tree, *patches):
         for p in patches:
-            self.run(["patch", "-Np1", "-i", p], cwd=tree, stdout=subprocess.DEVNULL)
+            self.run(["patch", "-Np1", "-i", p], cwd=tree)
 
     def cmake(self, tree, *args, install=True):
         build = tree / "build-vita"
         self.run(["cmake", "-S", tree, "-B", build, "-G", "Ninja",
                   f"-DCMAKE_TOOLCHAIN_FILE={self.sdk / 'share/vita.toolchain.cmake'}",
                   f"-DCMAKE_INSTALL_PREFIX={self.sdk / 'arm-vita-eabi'}",
-                  "-DCMAKE_BUILD_TYPE=Release", *args], stdout=subprocess.DEVNULL)
-        self.run(["ninja", "-C", build, "-j", self.jobs], stdout=subprocess.DEVNULL)
+                  "-DCMAKE_BUILD_TYPE=Release", *args])
+        self.run(["ninja", "-C", build, "-j", self.jobs])
         if install:
-            self.run(["ninja", "-C", build, "install"], stdout=subprocess.DEVNULL)
+            self.run(["ninja", "-C", build, "install"])
         return build
 
     # Steps.
@@ -176,15 +272,15 @@ class Toolchain:
             del self.env["VITASDK_CHANNEL"]
 
     def step_packages(self):
-        self.run(f"yes | vdpm install {' '.join(PACKAGES)}", stdout=subprocess.DEVNULL)
-        listing = subprocess.run(["vdpm", "list"], env=self.env, capture_output=True, text=True, check=True).stdout
+        self.run(f"yes | vdpm install {' '.join(PACKAGES)}")
+        listing = subprocess.run(["vdpm", "list"], env=self.env, capture_output=True, text=True).stdout
         installed = dict(l.split()[:2] for l in listing.splitlines() if len(l.split()) == 2)
         for name, version in PACKAGES.items():
             have = installed.get(name)
             if have is None:
-                sys.exit(f"vdpm didn't install {name}")
+                raise StepFailed(f"vdpm didn't install {name}")
             if have != version:
-                print(f"WARNING: {name} {have} (the eboot was developed with {version})")
+                self.warnings.append(f"{name} {have} (the eboot was developed with {version})")
 
     def step_pvr(self):
         repo = self.checkout(*PVR_REPO, "PVR_PSP2")
@@ -208,80 +304,66 @@ class Toolchain:
                   f"Cython=={CYTHON}", "setuptools", "wheel", "future"])
 
     def step_libjpeg(self):
-        # vdpm's recipe, but with SIMD (NEON): JPEG decoding ~40% faster.
         tree = self.unpack(self.fetch(*LIBJPEG), "libjpeg-turbo")
-        self.cmake(tree, "-DENABLE_SHARED=FALSE", "-DWITH_SIMD=TRUE", "-DWITH_TOOLS=FALSE")
+        self.cmake(tree, *LIBJPEG_FLAGS)
 
     def step_zlib(self):
-        # A drop-in libz.a (zlib API, NEON inflate/adler32/slide_hash). Runtime
-        # CPU detection can't work on the Vita (no /proc, no getauxval), and
-        # ACLE CRC32 is ARMv8, which the Cortex-A9 lacks. Only the library
-        # replaces the SDK's; the stock headers stay (same ABI in compat mode).
+        # Only the library replaces the SDK's; the stock headers stay (same
+        # ABI in compat mode).
         tree = self.unpack(self.fetch(*ZLIBNG), "zlib-ng")
-        build = self.cmake(tree, "-DZLIB_COMPAT=ON", "-DZLIB_ENABLE_TESTS=OFF", "-DZLIBNG_ENABLE_TESTS=OFF",
-                           "-DWITH_GTEST=OFF", "-DBUILD_SHARED_LIBS=OFF", "-DWITH_RUNTIME_CPU_DETECTION=OFF",
-                           "-DWITH_ACLE=OFF", install=False)
+        build = self.cmake(tree, *ZLIB_FLAGS, install=False)
         shutil.copy2(build / "libz.a", self.sdk / "arm-vita-eabi/lib/libz.a")
 
     def step_sdl2(self):
         tree = self.unpack(self.fetch(*SDL2), "SDL2")
         self.patch(tree, PATCHES / "sdl2-2.32.8-vita-pvr-ime.patch", PATCHES / "sdl2-2.32.8-vita-stdio-buffer.patch")
-        self.cmake(tree, "-DSDL_TEST=OFF", "-DVIDEO_VITA_PVR=ON", f"-DCMAKE_C_FLAGS={CFLAGS}")
+        self.cmake(tree, *SDL2_FLAGS)
 
     def step_sdl2_image(self):
         tree = self.unpack(self.fetch(*SDL2_IMAGE), "SDL2_image")
         self.patch(tree, self.fetch(*SDL2_IMAGE_PKGCONFIG, name="sdl2_image-pkg-config-fix.patch"),
                    PATCHES / "sdl2_image-2.8.12-jpeg-rgba.patch", PATCHES / "sdl2_image-2.8.12-vita-hw-jpeg.patch")
-        # vdpm's recipe, but without SDL_image's built-in stb_image, which
-        # otherwise decodes PNG and JPEG (far slower than libpng/libjpeg-turbo).
-        self.cmake(tree, "-DCMAKE_POSITION_INDEPENDENT_CODE=OFF", "-DBUILD_SHARED_LIBS=OFF", "-DSDL2IMAGE_SAMPLES=OFF",
-                   "-DSDL2IMAGE_WEBP=ON", "-DSDL2IMAGE_DEPS_SHARED=OFF", "-DSDL2IMAGE_AVIF=OFF", "-DSDL2IMAGE_TIF=OFF",
-                   "-DSDL2IMAGE_BACKEND_STB=OFF", f"-DCMAKE_C_FLAGS={CFLAGS}", f"-DCMAKE_CXX_FLAGS={CXXFLAGS}")
+        self.cmake(tree, *SDL2_IMAGE_FLAGS)
 
     def step_harfbuzz(self):
         tree = self.unpack(self.fetch(*HARFBUZZ), "harfbuzz")
         self.patch(tree, PATCHES / "harfbuzz-hb-ft-static-face-deadlock.patch")
-        self.cmake(tree, "-DHB_HAVE_FREETYPE=ON", f"-DCMAKE_C_FLAGS={CFLAGS}", f"-DCMAKE_CXX_FLAGS={CXXFLAGS}")
+        self.cmake(tree, *HARFBUZZ_FLAGS)
 
     def step_ffmpeg(self):
         tree = self.unpack(self.fetch(*FFMPEG), "ffmpeg")
-        self.run(["sh", PATCHES / "ffmpeg-9.0.2-vita-build.sh"], cwd=tree, stdout=subprocess.DEVNULL)
-        self.run(["make", f"-j{self.jobs}"], cwd=tree, stdout=subprocess.DEVNULL)
-        self.run(["make", "install"], cwd=tree, stdout=subprocess.DEVNULL)
+        self.run(["sh", PATCHES / "ffmpeg-9.0.2-vita-build.sh"], cwd=tree)
+        self.run(["make", f"-j{self.jobs}"], cwd=tree)
+        self.run(["make", "install"], cwd=tree)
 
     def step_cpython(self):
         tree = self.checkout(*CPYTHON, "cpython-vita")
         self.patch(tree, PATCHES / "cpython-vita-timed-waits.patch", PATCHES / "cpython-vita-scandir-d-type.patch")
         prefix = self.sdk / "arm-vita-eabi"
-        self.run(["./configure", "--build=x86_64-pc-linux-gnu", "--host=arm-vita-eabi",
-                  "--with-build-python=python3.11", f"--prefix={prefix}", "--disable-test-modules",
-                  "--with-ensurepip=no", "--disable-ipv6", "CONFIG_SITE=config.site", "LDFLAGS=-lpthread",
-                  "CFLAGS=-std=gnu11 -Wno-error=implicit-function-declaration -Wno-error=int-conversion "
-                  "-Wno-error=incompatible-pointer-types -Wl,-q,-z,nocopyreloc",
-                  "CPPFLAGS=-Wl,-q,-z,nocopyreloc"], cwd=tree, stdout=subprocess.DEVNULL)
-        # -O2: the default build here isn't optimised for speed.
-        opt = "OPT=-DNDEBUG -g -fwrapv -O2 -Wall"
-        self.run(["make", f"-j{self.jobs}", opt], cwd=tree, stdout=subprocess.DEVNULL)
-        self.run(["make", "install", opt], cwd=tree, stdout=subprocess.DEVNULL)
+        self.run(["./configure", f"--prefix={prefix}", *CPYTHON_CONFIGURE], cwd=tree)
+        self.run(["make", f"-j{self.jobs}", CPYTHON_OPT], cwd=tree)
+        self.run(["make", "install", CPYTHON_OPT], cwd=tree)
         shutil.copy2(tree / "Modules/_decimal/libmpdec/libmpdec.a", prefix / "lib/libmpdec.a")
 
     STEPS = ["vitasdk", "packages", "pvr", "hostpy", "libjpeg", "zlib", "sdl2", "sdl2_image", "harfbuzz", "ffmpeg", "cpython"]
 
-    # What each step's result depends on, for its fingerprint.
     def recipe(self, name):
-        files = {
-            "sdl2": ["sdl2-2.32.8-vita-pvr-ime.patch", "sdl2-2.32.8-vita-stdio-buffer.patch"],
-            "sdl2_image": ["sdl2_image-2.8.12-jpeg-rgba.patch", "sdl2_image-2.8.12-vita-hw-jpeg.patch"],
-            "harfbuzz": ["harfbuzz-hb-ft-static-face-deadlock.patch"],
-            "ffmpeg": ["ffmpeg-9.0.2-vita-build.sh"],
-            "cpython": ["cpython-vita-timed-waits.patch", "cpython-vita-scandir-d-type.patch"],
-        }.get(name, [])
-        h = hashlib.sha256(inspect.getsource(getattr(Toolchain, "step_" + name)).encode())
-        h.update(repr((VDPM, VITASDK_CHANNEL, PACKAGES, PVR_REPO, PVR_STUBS, CYTHON, LIBJPEG, ZLIBNG, SDL2,
-                       SDL2_IMAGE, SDL2_IMAGE_PKGCONFIG, HARFBUZZ, FFMPEG, CPYTHON, CFLAGS, CXXFLAGS)).encode())
-        for f in files:
+        """A fingerprint of everything the step's result depends on."""
+        h = hashlib.sha256(repr((RECIPE_REVISION, STEP_INPUTS[name])).encode())
+        for f in STEP_PATCHES.get(name, []):
             h.update((PATCHES / f).read_bytes())
         return h.hexdigest()
+
+    def is_done(self, name):
+        marker = self.marker(name)
+        if not marker.exists():
+            return False
+        recorded, recipe = marker.read_text(), self.recipe(name)
+        old, then = LEGACY_RECIPES.get(name, (None, None))
+        if recorded == old and recipe == then:
+            marker.write_text(recipe)
+            return True
+        return recorded == recipe
 
     def marker(self, name):
         return self.root / ".done" / name
@@ -297,6 +379,7 @@ def main():
 
     tc = Toolchain(args.dir, args.jobs)
     (tc.root / ".done").mkdir(parents=True, exist_ok=True)
+    tc.logs.mkdir(parents=True, exist_ok=True)
 
     redo = False
     for name in Toolchain.STEPS:
@@ -305,14 +388,28 @@ def main():
         marker = tc.marker(name)
         recipe = tc.recipe(name)
         forced = name in (args.start, args.only)
-        redo = redo or forced or not marker.exists() or marker.read_text() != recipe
+        redo = redo or forced or not tc.is_done(name)
         if not redo:
-            print(f"== {name}: done")
+            print(f"  {name}: done earlier")
             continue
-        print(f"== {name}", flush=True)
         marker.unlink(missing_ok=True)
-        getattr(tc, "step_" + name)()
+        tc.step, tc.log = name, tc.logs / f"{name}.log"
+        tc.log.write_text("")
+        start = time.time()
+        try:
+            with progress(name) as tc.status:
+                getattr(tc, "step_" + name)()
+        except (StepFailed, subprocess.CalledProcessError, OSError) as e:
+            tail = tc.log.read_text(errors="replace").splitlines()[-30:]
+            print("\n".join(tail))
+            sys.exit(f"\n{name} failed: {e}\nFull log: {tc.log}")
+        finally:
+            tc.status = None
         marker.write_text(recipe)
+        print(f"  {name}: built in {time.time() - start:.0f} s (log: {tc.log})", flush=True)
+
+    for w in tc.warnings:
+        print(f"WARNING: {w}")
 
     print(f"\nToolchain ready in {tc.root}. Build the eboot with:\n"
           f"  uv run RenPy-Vita-8/pipeline/vita_port_build.py")

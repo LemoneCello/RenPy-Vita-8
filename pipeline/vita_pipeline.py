@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["rich"]
 # ///
 """Run every stage of a Vita build for one game, from a settings file.
 
@@ -156,19 +156,56 @@ def main():
     cmds, title_id = plan(cfg, args.variant, vpk)
 
     env = dict(os.environ, VITA_TITLE_ID=title_id)
+    con = console()
+    times = [ ]
 
     for name in STAGES:
         if name not in stages:
             continue
         cmd = cmds[name]
-        print(f"== {name}: {shlex.join(cmd)}", flush=True)
+        if con:
+            con.rule(f"[bold cyan]{name}", align="left")
+            con.print(shlex.join(cmd), style="dim", markup=False, highlight=False)
+        else:
+            print(f"== {name}: {shlex.join(cmd)}", flush=True)
         if args.dry_run:
             continue
         start = time.time()
         result = subprocess.run(cmd, env=env)
         if result.returncode != 0:
+            if con:
+                con.print(f"[bold red]{name} failed[/] (exit {result.returncode})")
+                sys.exit(1)
             sys.exit(f"Stage {name} failed (exit {result.returncode})")
-        print(f"== {name} done in {time.time() - start:.0f} s", flush=True)
+        times.append((name, time.time() - start))
+        if not con:
+            print(f"== {name} done in {times[-1][1]:.0f} s", flush=True)
+
+    if times and con:
+        from rich.table import Table
+        table = Table(title=f"{title_id} ({args.variant})", title_justify="left")
+        table.add_column("Stage")
+        table.add_column("Time", justify="right")
+        for name, seconds in times:
+            table.add_row(name, f"{seconds:.0f} s")
+        table.add_row("[bold]total", f"[bold]{sum(s for _, s in times):.0f} s")
+        con.print(table)
+
+    build = cmds["build"]
+    if times and "build" in [n for n, _ in times]:
+        result = build[build.index("--vpk") + 1] if "--vpk" in build else os.path.join(build[build.index("--out") + 1], title_id)
+        print(f"Result: {result}")
+
+
+def console():
+    """A rich console for an interactive terminal, else None (plain output)."""
+    if not sys.stdout.isatty():
+        return None
+    try:
+        from rich.console import Console
+        return Console()
+    except ImportError:
+        return None
 
 
 if __name__ == "__main__":

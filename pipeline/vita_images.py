@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["pillow"]
+# dependencies = ["pillow", "rich"]
 # ///
 """Image stage: downscale a game's images and make Ren'Py draw them at full size.
 
@@ -29,6 +29,8 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path, PurePosixPath
 
 from PIL import Image
+
+from vita_common import progress
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 HOOK_NAME = "vita_oversample.rpy"
@@ -234,8 +236,9 @@ def main():
     scaled, small, odd = [], 0, 0
     trims = {}
     before = after = 0
-    with ProcessPoolExecutor(args.jobs) as pool:
+    with ProcessPoolExecutor(args.jobs) as pool, progress("Resizing images", total=len(jobs)) as bar:
         for rel, status, (w, h), new, trim in pool.map(process, jobs, chunksize=8):
+            bar.advance(1, current=str(rel))
             if status == "small":
                 small += 1
                 continue

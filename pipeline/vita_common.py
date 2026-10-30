@@ -63,3 +63,109 @@ def extract_entry(archive, offset, length, prefix, dest):
                 raise IOError(f"{dest.name}: archive truncated")
             out.write(chunk)
             remaining -= len(chunk)
+
+
+# --- progress display -----------------------------------------------------
+#
+# Bars and spinners with rich in an interactive terminal; plain lines
+# otherwise (logs, CI, or a script run without rich installed).
+
+def _rich():
+    if not sys.stdout.isatty():
+        return None
+    try:
+        import rich.progress
+        return rich.progress
+    except ImportError:
+        return None
+
+
+class _Plain:
+    """Fallback: a line at every 10% (bars) or at start and end (spinners)."""
+
+    def __init__(self, description, total, unit):
+        self.description, self.total, self.unit, self.done, self.shown = description, total, unit, 0, -1
+        print(f"{description}...", flush=True)
+
+    def advance(self, n=1, current=None):
+        self.done += n
+        if self.total:
+            tenth = int(10 * self.done / self.total)
+            if tenth > self.shown:
+                self.shown = tenth
+                done, total = (f"{self.done / 2**20:.0f}", f"{self.total / 2**20:.0f} MiB") if self.unit == "bytes" \
+                    else (self.done, self.total)
+                print(f"  {self.description}: {done}/{total}", flush=True)
+
+    def update(self, description):
+        pass
+
+    def log(self, message):
+        print(message, flush=True)
+
+
+class _Rich:
+
+    def __init__(self, rp, description, total, unit):
+        from rich.table import Column
+
+        columns = [rp.SpinnerColumn(), rp.TextColumn("[bold]{task.description}")]
+        if total is None:
+            columns += [rp.TimeElapsedColumn()]
+        else:
+            columns += [rp.BarColumn(bar_width=24)]
+            if unit == "bytes":
+                columns += [rp.DownloadColumn(binary_units=True), rp.TransferSpeedColumn()]
+            else:
+                columns += [rp.MofNCompleteColumn()]
+            columns += [rp.TimeRemainingColumn()]
+        # Spinners vanish when done; bars stay to show the result.
+        self.progress = rp.Progress(*columns, transient=total is None)
+        # The item being worked on, if the terminal has room for it.
+        if total is not None and self.progress.console.width >= 110:
+            self.progress.columns += (rp.TextColumn("[dim]{task.fields[current]}",
+                                                    table_column=Column(no_wrap=True, overflow="ellipsis",
+                                                                        max_width=40)),)
+        self.task = self.progress.add_task(description, total=total, current="")
+
+    def advance(self, n=1, current=None):
+        if current is not None:
+            self.progress.update(self.task, advance=n, current=current)
+        else:
+            self.progress.update(self.task, advance=n)
+
+    def update(self, description):
+        self.progress.update(self.task, description=description)
+
+    def log(self, message):
+        self.progress.console.print(message, markup=False, highlight=False)
+
+
+class progress:
+    """A progress bar (total given) or a spinner with elapsed time (total None).
+
+        with progress("Encoding movies", total=len(jobs)) as bar:
+            bar.advance(1, current=name)
+        with progress("Uploading", total=nbytes, unit="bytes") as bar: ...
+        with progress("Building FFmpeg") as spinner:
+            spinner.update("Building FFmpeg: make")
+
+    bar.log() prints a line above the bar.
+    """
+
+    def __init__(self, description, total=None, unit=None):
+        self.args = (description, total, unit)
+
+    def __enter__(self):
+        rp = _rich()
+        if rp is None:
+            self.display = _Plain(*self.args)
+        else:
+            self.display = _Rich(rp, *self.args)
+            self.display.progress.start()
+        return self.display
+
+    def __exit__(self, *exc):
+        if isinstance(self.display, _Rich):
+            self.display.progress.stop()
+        return False

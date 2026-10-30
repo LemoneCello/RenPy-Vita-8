@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["rich"]
 # ///
 """Build stage: assemble the Vita app folder from the other stages' outputs.
 
@@ -56,6 +56,8 @@ import urllib.request
 import zipfile
 import zlib
 from pathlib import Path, PurePosixPath
+
+from vita_common import progress
 
 # The pipeline's own files (port/, rpy/) are next to this script.
 HERE = Path(__file__).resolve().parent
@@ -206,7 +208,7 @@ def archive_name(game_rel):
     return "vita_" + re.sub(r"[^a-z0-9]+", "_", area.lower()).strip("_") + ".rpa"
 
 
-def write_rpa(path, files):
+def write_rpa(path, files, bar=None):
     """Writes an RPA-3.0 archive of (name, source) pairs, deterministically."""
     tmp = path.with_suffix(".part")
     index = { }
@@ -216,6 +218,8 @@ def write_rpa(path, files):
             data = src.read_bytes()
             index[name] = [(f.tell() ^ RPA_KEY, len(data) ^ RPA_KEY)]
             f.write(data)
+            if bar:
+                bar.advance(len(data), current=name)
         index_offset = f.tell()
         f.write(zlib.compress(pickle.dumps(index, protocol=2), 9))
         f.seek(0)
@@ -231,13 +235,15 @@ def pack(app_dir, mirror):
             if name:
                 groups.setdefault(name, [ ]).append(rel)
 
-    for name, rels in sorted(groups.items()):
-        write_rpa(app_dir / "game" / name, [(rel[len("game/"):], app_dir / rel) for rel in rels])
-        for rel in rels:
-            (app_dir / rel).unlink()
-            del mirror.sources[rel]
-        mirror.sources["game/" + name] = "packed"
-        print(f"  packed {len(rels):5} files into game/{name} ({mib((app_dir / 'game' / name).stat().st_size)})")
+    total = sum((app_dir / rel).stat().st_size for rels in groups.values() for rel in rels)
+    with progress("Packing archives", total=total, unit="bytes") as bar:
+        for name, rels in sorted(groups.items()):
+            write_rpa(app_dir / "game" / name, [(rel[len("game/"):], app_dir / rel) for rel in rels], bar)
+            for rel in rels:
+                (app_dir / rel).unlink()
+                del mirror.sources[rel]
+            mirror.sources["game/" + name] = "packed"
+            bar.log(f"  packed {len(rels):5} files into game/{name} ({mib((app_dir / 'game' / name).stat().st_size)})")
 
     for d in sorted((p for p in (app_dir / "game").rglob("*") if p.is_dir()), reverse=True):
         if not any(d.iterdir()):
@@ -247,12 +253,14 @@ def pack(app_dir, mirror):
 def build_vpk(app_dir, vpk_path):
     vpk_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = vpk_path.with_suffix(".part")
-    with zipfile.ZipFile(tmp, "w") as vpk:
-        for path in sorted(app_dir.rglob("*")):
-            if path.is_file():
-                name = path.relative_to(app_dir).as_posix()
-                kind = zipfile.ZIP_STORED if PurePosixPath(name).suffix.lower() in STORED_EXTS else zipfile.ZIP_DEFLATED
-                vpk.write(path, name, kind)
+    files = [p for p in sorted(app_dir.rglob("*")) if p.is_file()]
+    with zipfile.ZipFile(tmp, "w") as vpk, \
+            progress("Writing the VPK", total=sum(p.stat().st_size for p in files), unit="bytes") as bar:
+        for path in files:
+            name = path.relative_to(app_dir).as_posix()
+            kind = zipfile.ZIP_STORED if PurePosixPath(name).suffix.lower() in STORED_EXTS else zipfile.ZIP_DEFLATED
+            vpk.write(path, name, kind)
+            bar.advance(path.stat().st_size, current=name)
     tmp.replace(vpk_path)
 
 

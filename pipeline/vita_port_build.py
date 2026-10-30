@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = []
+# dependencies = ["rich"]
 # ///
 """Port stage: build the RenPy-Vita-8 eboot (and its Python library zip) from source.
 
@@ -34,6 +34,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+from vita_common import progress
 
 # This script lives in RenPy-Vita-8/pipeline/; the toolchain and outputs are
 # in the workspace (the current directory).
@@ -82,8 +84,19 @@ DROPPED_MODULES = ["tinyfiledialogs.c", "_renpytfd.c", "sdl2.c", "pygame_sdl2.mi
                    "pygame_sdl2.font.c", "pygame_sdl2.mixer_music.c"]
 
 
+# The spinner while building (vita_common.progress), or None.
+STATUS = None
+
+
 def run(cmd, cwd, env=None, log=None):
-    print("+", " ".join(str(c) for c in cmd), f"(in {cwd})", flush=True)
+    line = " ".join(str(c) for c in cmd)
+    if STATUS:
+        STATUS.update(f"Building the eboot: {Path(str(cmd[0])).name}")
+        if log:
+            with open(log, "a") as out:
+                out.write(f"+ {line} (in {cwd})\n")
+    else:
+        print("+", line, f"(in {cwd})", flush=True)
     with open(log, "a") if log else open(os.devnull, "w") as out:
         rc = subprocess.run([str(c) for c in cmd], cwd=cwd, env=env,
                             stdout=out if log else None, stderr=subprocess.STDOUT if log else None).returncode
@@ -140,6 +153,12 @@ def main():
     ap.add_argument("--jobs", type=int, default=os.cpu_count())
     args = ap.parse_args()
 
+    global STATUS
+    with progress("Building the eboot") as STATUS:
+        build(args)
+
+
+def build(args):
     refs = recorded_refs()
     for item in args.ref:
         name, _, ref = item.partition("=")
@@ -157,6 +176,8 @@ def main():
     env["VITASDK"] = str(VITASDK)
     env["PATH"] = f"{HOSTPY}:{VITASDK / 'bin'}:{env['PATH']}"
 
+    if STATUS:
+        STATUS.update("Building the eboot: copying sources")
     for name in ("renpy-8", "pygame_sdl2", "renpy-vita"):
         export(name, refs[name], name in args.worktree or "all" in args.worktree, work / name, work / "export")
 
@@ -200,6 +221,8 @@ def main():
 
     # Cython: generate the C modules (setup.py without a command only
     # cythonizes; distutils then complains about the missing command).
+    if STATUS:
+        STATUS.update("Building the eboot: cython")
     menv = dict(env, PYGAME_SDL2_STATIC="1")
     subprocess.run([HOSTPY / "python3", "setup.py"], cwd=work / "pygame_sdl2", env=menv,
                    stdout=open(log, "a"), stderr=subprocess.STDOUT)
@@ -255,7 +278,7 @@ def main():
 
     shutil.copy2(vita / "build/eboot.bin", out / "eboot.bin")
     shutil.copy2(vita / "build/eboot.elf", out / "eboot.elf")
-    print(f"built {out}: " + ", ".join(f"{p.name} {p.stat().st_size // 1024} KiB" for p in (out / "eboot.bin", zip_path)))
+    STATUS.log(f"built {out}: " + ", ".join(f"{p.name} {p.stat().st_size // 1024} KiB" for p in (out / "eboot.bin", zip_path)))
 
 
 if __name__ == "__main__":
