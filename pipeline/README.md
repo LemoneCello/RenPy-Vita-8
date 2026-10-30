@@ -24,6 +24,36 @@ workspace/
 
 `pipeline/container/` has a Debian image with everything the scripts need. `run-container.sh`, started from the workspace, mounts it at `/work` and shares the host network so the container can reach the Vita. The scripts use [uv](https://docs.astral.sh/uv/) (`uv run script.py`); each script declares its own dependencies.
 
+## Building the eboot
+
+The eboot is built once and is the same for every game. It takes two commands, run from the workspace:
+
+```
+uv run RenPy-Vita-8/pipeline/vita_toolchain.py
+uv run RenPy-Vita-8/pipeline/vita_port_build.py --label zc --worktree renpy-vita \
+    --ref renpy-8=vita-perf --ref pygame_sdl2=vita-perf
+```
+
+**`vita_toolchain.py`** sets up everything in `build/toolchain/`, with pinned versions and checksums. A full run took under 7 minutes on 32 cores (longer with fewer; most of it is FFmpeg and CPython); reruns skip finished steps.
+
+| Step | What |
+|---|---|
+| `vitasdk` | VitaSDK, series 2026.08, from vdpm's bootstrap |
+| `packages` | The vdpm libraries the port links. It warns if vdpm serves different versions than the ones the eboot was developed with. |
+| `pvr` | PVR_PSP2 v3.9 GLES/EGL headers and stub libraries |
+| `hostpy` | Host Python 3.11 with Cython 0.29.37 (not 3.x) |
+| `libjpeg` | libjpeg-turbo 3.2.0 with NEON: JPEG decoding ~40% faster |
+| `zlib` | zlib-ng 2.2.4 as a drop-in `libz.a`, with NEON: faster PNG decoding |
+| `sdl2` | SDL2 2.32.8 with the PVR video driver. Patches: the on-screen keyboard crashed; file reads were 3–4× slow. |
+| `sdl2_image` | SDL2_image 2.8.12 with real libjpeg/libpng instead of stb_image. Patches: JPEG straight to RGBA; the Vita's hardware JPEG decoder for background loads. |
+| `harfbuzz` | HarfBuzz 14.5.0. Patch: the game hung for good when it freed a font. |
+| `ffmpeg` | FFmpeg 9.0.2 without `-ffast-math` (audio files starting at time 0 froze the game for ~20 s), with the MP4 demuxer and H.264 parser for the movie player |
+| `cpython` | Grimiku's `cpython-vita` (3.11) at `-O2`. Patches: **timed waits returned at once, which made Python ~3× slower**; faster directory listings. |
+
+The patches are in `patches/`. `--from STEP` redoes a step and everything after it. `--dir` builds somewhere else, and `VITA_TOOLCHAIN` points `vita_port_build.py` at it.
+
+**`vita_port_build.py`** copies `renpy-vita/` and the `renpy-8` and `pygame_sdl2` submodules (branch `vita-perf`) into `build/toolchain/port-work/<label>/` and runs Cython. It then compiles and links them into `build/port/<label>/`, which holds `eboot.bin` and `lib/python311.zip`. Rebuilds are incremental. After changing a library in the toolchain, delete `build/toolchain/port-work/<label>/renpy-vita/build/eboot.elf`; otherwise ninja doesn't notice the change and doesn't relink.
+
 ## Running the pipeline
 
 1. **A settings file per game.** Copy `pipeline/games/example.toml` and edit it (settings files in `games/` other than the example aren't committed):
@@ -89,36 +119,6 @@ To give a stage extra arguments, add them to the settings file:
 [stages.video]
 args = ["--crf", "20.2"]
 ```
-
-## Building the eboot
-
-The eboot is built once and is the same for every game. It takes two commands, run from the workspace:
-
-```
-uv run RenPy-Vita-8/pipeline/vita_toolchain.py
-uv run RenPy-Vita-8/pipeline/vita_port_build.py --label zc --worktree renpy-vita \
-    --ref renpy-8=vita-perf --ref pygame_sdl2=vita-perf
-```
-
-**`vita_toolchain.py`** sets up everything in `build/toolchain/`, with pinned versions and checksums. A full run took under 7 minutes on 32 cores (longer with fewer; most of it is FFmpeg and CPython); reruns skip finished steps.
-
-| Step | What |
-|---|---|
-| `vitasdk` | VitaSDK, series 2026.08, from vdpm's bootstrap |
-| `packages` | The vdpm libraries the port links. It warns if vdpm serves different versions than the ones the eboot was developed with. |
-| `pvr` | PVR_PSP2 v3.9 GLES/EGL headers and stub libraries |
-| `hostpy` | Host Python 3.11 with Cython 0.29.37 (not 3.x) |
-| `libjpeg` | libjpeg-turbo 3.2.0 with NEON: JPEG decoding ~40% faster |
-| `zlib` | zlib-ng 2.2.4 as a drop-in `libz.a`, with NEON: faster PNG decoding |
-| `sdl2` | SDL2 2.32.8 with the PVR video driver. Patches: the on-screen keyboard crashed; file reads were 3–4× slow. |
-| `sdl2_image` | SDL2_image 2.8.12 with real libjpeg/libpng instead of stb_image. Patches: JPEG straight to RGBA; the Vita's hardware JPEG decoder for background loads. |
-| `harfbuzz` | HarfBuzz 14.5.0. Patch: the game hung for good when it freed a font. |
-| `ffmpeg` | FFmpeg 9.0.2 without `-ffast-math` (audio files starting at time 0 froze the game for ~20 s), with the MP4 demuxer and H.264 parser for the movie player |
-| `cpython` | Grimiku's `cpython-vita` (3.11) at `-O2`. Patches: **timed waits returned at once, which made Python ~3× slower**; faster directory listings. |
-
-The patches are in `patches/`. `--from STEP` redoes a step and everything after it. `--dir` builds somewhere else, and `VITA_TOOLCHAIN` points `vita_port_build.py` at it.
-
-**`vita_port_build.py`** copies `renpy-vita/` and the `renpy-8` and `pygame_sdl2` submodules (branch `vita-perf`) into `build/toolchain/port-work/<label>/` and runs Cython. It then compiles and links them into `build/port/<label>/`, which holds `eboot.bin` and `lib/python311.zip`. Rebuilds are incremental. After changing a library in the toolchain, delete `build/toolchain/port-work/<label>/renpy-vita/build/eboot.elf`; otherwise ninja doesn't notice the change and doesn't relink.
 
 ## What's changed in the port
 
