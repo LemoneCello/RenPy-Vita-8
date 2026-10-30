@@ -74,4 +74,8 @@ Only use it on games you own, and don't distribute the processed game files.
 - [SonicMastr's renpy-vita](https://github.com/SonicMastr/renpy-vita): the original Ren'Py 7 port.
 - [Ren'Py](https://www.renpy.org/).
 
-MIT licensed, as upstream (see `LICENSE`); the bundled projects keep their own licences.
+## Licence
+
+- **The port** (everything outside `pipeline/`): MIT, as upstream (see `LICENSE`).
+- **[`pipeline/`](pipeline/README.md#licence):** GNU AGPL-3.0, with a few exceptions listed there.
+- **The submodules and the libraries the eboot is built from** keep their own licences.

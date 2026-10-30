@@ -185,3 +185,15 @@ The pipeline reads everything from the game's own files and Ren'Py's rules, with
 - Fonts used for text that isn't in any script (typed names, generated text) would lose characters when subset. Keep them with `[stages.fonts] args = ["--keep", "FONT.ttf"]`.
 - Some games switch effects or layouts off for mobile variants. The port reports the Vita as `vita small phone touch mobile`.
 - `--variant slice` needs a `[slice]` section listing the folders to include.
+
+## Licence
+
+Copyright (C) 2026 LemoneCello and contributors.
+
+The pipeline (everything in `pipeline/`) is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [`LICENSE`](LICENSE) for the full text.
+
+Exceptions:
+- **`patches/`:** each patch is under the licence of the project it modifies (SDL, SDL_image, HarfBuzz, FFmpeg, CPython).
+- **`port/renpy.py`:** based on Ren'Py's launcher, and keeps Ren'Py's MIT licence (see its header).
+
+The rest of this repository (the port itself) is MIT-licensed, and the games you process keep their own terms.
