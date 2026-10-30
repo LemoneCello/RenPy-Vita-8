@@ -1,36 +1,42 @@
-# RenPy-Vita-8
-This is an updated version of [SonicMastr's Ren'Py 7 Vita port](https://github.com/SonicMastr/renpy-vita/tree/main) that changes the underlying library from Python2.7 to Python3.11 and bumps the supported features from late 2021 up to end of 2024.
+# RenPy-Vita-8: Ren'Py → PS Vita pipeline
 
-As of v0.2.1 release, [VitaGL](https://github.com/Rinnegatamante/vitaGL) can be used as an alternative solution for OpenGL handling and there is a seperate release for it in the [release section](https://github.com/Grimiku/RenPy-Vita-8/releases). Please do check out the [vitagl branch](https://github.com/Grimiku/RenPy-Vita-8/tree/vitagl) for more details.
+This fork of [Grimiku's RenPy-Vita-8](https://github.com/Grimiku/RenPy-Vita-8) adds a pipeline that turns a Ren'Py game's PC release into a complete PS Vita app (a VPK), and makes the game run well on the Vita.
 
-## This fork: `vita-perf` and a Ren'Py → Vita pipeline
-The `vita-perf` branch of this fork (with matching `vita-perf` branches in the `renpy-8` and `pygame_sdl2` submodules) adds performance work and fixes for the PVR build:
-- a hardware movie player that can play two movies at once
-- much faster Python, image loading and boot
-- fixes for crashes and hangs
+It has two parts:
 
-It also adds [`pipeline/`](pipeline/README.md): scripts that turn a Ren'Py game's PC release into a complete Vita app and upload it. They extract and convert the assets, build the app folder, and include the eboot build from source. See [pipeline/README.md](pipeline/README.md).
+- **[`pipeline/`](pipeline/README.md):** scripts that build the app. In one run they:
+  - extract the game's files
+  - re-encode its movies
+  - shrink its images and fonts
+  - add the Vita compatibility and speed-up hooks
+  - write the VPK, or upload the app straight to a Vita
+- **The port itself, on the `vita-perf` branches** of this repo and its `renpy-8` and `pygame_sdl2` submodules:
+  - a hardware movie player (two movies at once, gapless loops)
+  - faster image loading and boot
+  - fixes for crashes and hangs
 
-## Instructions for regular users
-This repo presupposes that you have your Ren'Py game already installed on the Vita. Please use the [Ren'Py PSVita Distribution Tool](https://github.com/SonicMastr/renpy-vita/releases/tag/v1.0) to create your VPK if you haven't done it yet and install your game before proceeding.
+  `pipeline/vita_port_build.py` builds the eboot from these. The patched libraries in `pipeline/patches/` add more fixes and speed; CPython's timed-wait fix alone makes Python about 3× faster.
 
-**!!REMEMBER!!** Although below steps are exactly the same for each release, VitaGL version requires you to have **libshacccg.suprx** under _ur0:/data/_ directory on your Vita. If you don't have it there, follow the [guide linked under VitaGL repo](https://cimmerian.gitbook.io/vita-troubleshooting-guide/shader-compiler/extract-libshacccg.suprx).
+Only the PVR build of the port is supported, not VitaGL.
 
-1) Go into [Release section of this repo](https://github.com/Grimiku/RenPy-Vita-8/releases/) and download the latest .zip archive (ie. _RenPy_Vita_8_v0.1.zip_);
-2) Open the app folder of your game on the Vita (ie. _ux0:app/BRBRB001/_) and delete everything apart from _game/_ and _sce_sys/_ folders;
-3) Unpack everything from the .zip from step 1) into the folder from step 2);
-4) Proceed to run the game as you normally would by selecting it from LiveArea.
+## Getting started
 
-## Build instructions for some crazy people who want to build this, ignore otherwise
-One of the many things I learned during the update process for this particual port is that every build instruction becomes outdated extremely fast. Another thing is that vast majority of the build process boils down to work outside of the main repo (ie. VITASDK setup, SDL2 setup, other dependencies). That's why below are just major points to look out for while maybe at a later stage more detailed steps will follow:
+```
+git clone --recurse-submodules -b vita-perf https://github.com/LemoneCello/RenPy-Vita-8.git
+```
 
-* Requires linux enviroment or WSL on Windows;
-* Requires Python 3.11;
-* Works under Cython 0.29.37 but not >3.0;
-* Requires rsync for the bash script to work;
-* Requires SDL2 built with -DVIDEO_VITA_PVR=ON flag;
-* Requires you make sure openssl-1.1.1 is recognized by your vitasdk during cmake;
-* Requires a couple of additional modifications to CPython3.11 for Vita and additional libraries. You can take a look at [my fork](https://github.com/Grimiku/cpython-vita) and modify your vitasdk with it or just run your own stuff based on my commits there;
-* Requires modifying vitasdk freetype package to compile with harfbuzz;
-* _all_in_one.bash_ will try to do all the work for you but expect it will throw errors;
-* Requires a lot of patience.
+Then follow [pipeline/README.md](pipeline/README.md). In outline:
+1. Set up a workspace folder next to this repo, holding your game's PC release.
+2. Build the toolchain and the eboot once.
+3. Make a settings file for the game.
+4. Run `uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml`.
+
+Only use it on games you own, and don't distribute the processed game files.
+
+## Credits
+
+- [Grimiku's RenPy-Vita-8](https://github.com/Grimiku/RenPy-Vita-8): Ren'Py 8 / Python 3.11 on the Vita, which this builds on.
+- [SonicMastr's renpy-vita](https://github.com/SonicMastr/renpy-vita): the original Ren'Py 7 port.
+- [Ren'Py](https://www.renpy.org/).
+
+MIT licensed, as upstream (see `LICENSE`); the bundled projects keep their own licences.
