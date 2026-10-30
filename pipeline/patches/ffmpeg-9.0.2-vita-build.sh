@@ -10,8 +10,8 @@
 # demuxer names, so MP4 couldn't be read at all), the h264 parser and the
 # h264_mp4toannexb bitstream filter, for the port's own hardware video player,
 # and the h264 (software) decoder.
-# Run from an unpacked ffmpeg-9.0.2 tree with VITASDK set and $VITASDK/bin on
-# PATH, then `make -j32 && make install`.
+# vita_toolchain.py runs this in an unpacked ffmpeg-9.0.2 tree (VITASDK set,
+# $VITASDK/bin on PATH), then `make` and `make install`.
 ./configure --prefix=$VITASDK/arm-vita-eabi \
   --enable-cross-compile --cross-prefix=$VITASDK/bin/arm-vita-eabi- --disable-shared --disable-runtime-cpudetect --disable-armv5te --disable-programs --disable-doc --disable-network --enable-libmp3lame --disable-everything \
   --enable-decoder=aac,adpcm_ima_qt,alac,ape,ac3,cinepak,flac,h264,mp3,mpeg4,opus,pcm_s16le,pcm_s24le,pcm_s32le,pcm_s8,pcm_u8,svq1,tta,vorbis,wmalossless,wavpack \

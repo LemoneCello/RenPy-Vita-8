@@ -35,7 +35,7 @@ from pathlib import Path
 # in the workspace (the current directory).
 PORT = Path(__file__).resolve().parent.parent
 WORK = Path.cwd()
-TOOLCHAIN = WORK / "build/toolchain"
+TOOLCHAIN = Path(os.environ.get("VITA_TOOLCHAIN") or WORK / "build/toolchain").resolve()  # vita_toolchain.py output
 VITASDK = TOOLCHAIN / "vitasdk"
 HOSTPY = TOOLCHAIN / "hostpy/bin"
 

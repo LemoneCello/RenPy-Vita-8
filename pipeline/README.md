@@ -92,33 +92,33 @@ args = ["--crf", "20.2"]
 
 ## Building the eboot
 
-The eboot is built once and is the same for every game:
+The eboot is built once and is the same for every game. It takes two commands, run from the workspace:
 
 ```
+uv run RenPy-Vita-8/pipeline/vita_toolchain.py
 uv run RenPy-Vita-8/pipeline/vita_port_build.py --label zc --worktree renpy-vita \
     --ref renpy-8=vita-perf --ref pygame_sdl2=vita-perf
 ```
 
-It copies `renpy-vita/` and the `renpy-8` and `pygame_sdl2` submodules (branch `vita-perf`) into `build/toolchain/port-work/<label>/` and runs Cython. It then compiles and links them into `build/port/<label>/`, which holds `eboot.bin` and `lib/python311.zip`. Rebuilds are incremental.
+**`vita_toolchain.py`** sets up everything in `build/toolchain/`, with pinned versions and checksums. A full run took under 7 minutes on 32 cores (longer with fewer; most of it is FFmpeg and CPython); reruns skip finished steps.
 
-It needs a toolchain in `build/toolchain/`:
+| Step | What |
+|---|---|
+| `vitasdk` | VitaSDK, series 2026.08, from vdpm's bootstrap |
+| `packages` | The vdpm libraries the port links. It warns if vdpm serves different versions than the ones the eboot was developed with. |
+| `pvr` | PVR_PSP2 v3.9 GLES/EGL headers and stub libraries |
+| `hostpy` | Host Python 3.11 with Cython 0.29.37 (not 3.x) |
+| `libjpeg` | libjpeg-turbo 3.2.0 with NEON: JPEG decoding ~40% faster |
+| `zlib` | zlib-ng 2.2.4 as a drop-in `libz.a`, with NEON: faster PNG decoding |
+| `sdl2` | SDL2 2.32.8 with the PVR video driver. Patches: the on-screen keyboard crashed; file reads were 3–4× slow. |
+| `sdl2_image` | SDL2_image 2.8.12 with real libjpeg/libpng instead of stb_image. Patches: JPEG straight to RGBA; the Vita's hardware JPEG decoder for background loads. |
+| `harfbuzz` | HarfBuzz 14.5.0. Patch: the game hung for good when it freed a font. |
+| `ffmpeg` | FFmpeg 9.0.2 without `-ffast-math` (audio files starting at time 0 froze the game for ~20 s), with the MP4 demuxer and H.264 parser for the movie player |
+| `cpython` | Grimiku's `cpython-vita` (3.11) at `-O2`. Patches: **timed waits returned at once, which made Python ~3× slower**; faster directory listings. |
 
-- **VitaSDK**: `vdpm/bootstrap-vitasdk.sh --install-dir build/toolchain/vitasdk`, then install these libraries with `vdpm`: taihen, sdl2_mixer, sdl2_image, sdl2_ttf, sdl2_gfx, ffmpeg, libwebp, libvorbis, libogg, mpg123, flac, libmikmod, opus, lame, freetype, harfbuzz, libjpeg-turbo, libpng, bzip2, openssl-1.1.1, zlib, libintl, fribidi, libzip, xz.
-- **PVR_PSP2 v3.9**: its `include/` folders (EGL, GLES, GLES2, KHR, gpu_es4) go into the SDK's include directory, and its stub libraries into the SDK's lib directory.
-- **A host Python 3.11** in `build/toolchain/hostpy/` with Cython 0.29.37 (not 3.x), setuptools and `future`.
-- **Rebuilt libraries**, replacing the vdpm versions:
+The patches are in `patches/`. `--from STEP` redoes a step and everything after it. `--dir` builds somewhere else, and `VITA_TOOLCHAIN` points `vita_port_build.py` at it.
 
-  | Library | How | Why |
-  |---|---|---|
-  | SDL2 2.32.8 | `-DVIDEO_VITA_PVR=ON`, plus `patches/sdl2-2.32.8-vita-pvr-ime.patch` and `sdl2-2.32.8-vita-stdio-buffer.patch` | PVR video driver; the on-screen keyboard crashed; file reads were 3–4× slow |
-  | SDL2_image 2.8.12 | `-DSDL2IMAGE_BACKEND_STB=OFF`, plus `patches/sdl2_image-2.8.12-jpeg-rgba.patch` then `sdl2_image-2.8.12-vita-hw-jpeg.patch` | Real libjpeg/libpng, JPEG straight to RGBA, the hardware JPEG decoder for background loads |
-  | HarfBuzz 14.5.0 | `patches/harfbuzz-hb-ft-static-face-deadlock.patch` | The game hung for good when it freed a font |
-  | libjpeg-turbo 3.2.0 | `-DWITH_SIMD=TRUE` (NEON) | JPEG decoding ~40% faster |
-  | FFmpeg 9.0.2 | `patches/ffmpeg-9.0.2-vita-build.sh`: without `-ffast-math`, with the MP4 demuxer and H.264 parser | Audio files starting at time 0 froze the game for ~20 s; MP4 support for the movie player |
-  | zlib-ng 2.2.4 | `patches/zlib-ng-2.2.4-vita-build.sh` (compat mode, NEON) | Faster PNG decoding |
-  | CPython 3.11 | Grimiku's `cpython-vita` (branch `patch-1`) at `-O2`, plus `patches/cpython-vita-timed-waits.patch` and `cpython-vita-scandir-d-type.patch` | **Essential**: timed waits returned at once, which made Python ~3× slower; directory listings faster |
-
-After replacing an SDK library, delete `build/toolchain/port-work/<label>/renpy-vita/build/eboot.elf`. Otherwise ninja doesn't notice the change and doesn't relink.
+**`vita_port_build.py`** copies `renpy-vita/` and the `renpy-8` and `pygame_sdl2` submodules (branch `vita-perf`) into `build/toolchain/port-work/<label>/` and runs Cython. It then compiles and links them into `build/port/<label>/`, which holds `eboot.bin` and `lib/python311.zip`. Rebuilds are incremental. After changing a library in the toolchain, delete `build/toolchain/port-work/<label>/renpy-vita/build/eboot.elf`; otherwise ninja doesn't notice the change and doesn't relink.
 
 ## What's changed in the port
 
