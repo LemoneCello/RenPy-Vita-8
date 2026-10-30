@@ -1,0 +1,5 @@
+__pycache__/
+
+# Per-game settings stay local; only the example is shared.
+games/*.toml
+!games/example.toml

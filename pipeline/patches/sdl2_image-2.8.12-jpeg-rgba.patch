@@ -1,0 +1,30 @@
+--- a/src/IMG_jpg.c	2026-10-30 02:37:35.412675347 +0000
++++ b/src/IMG_jpg.c	2026-10-30 02:37:35.419675373 +0000
+@@ -374,8 +374,15 @@
+         /* Allocate an output surface to hold the image */
+         vars->surface = SDL_CreateRGBSurfaceWithFormat(0, vars->cinfo.output_width, vars->cinfo.output_height, 0, SDL_PIXELFORMAT_BGRA32);
+     } else {
++#ifdef JCS_EXTENSIONS
++        /* libjpeg-turbo: decode straight to 32-bit RGBA (opaque), which
++           callers that want 32-bit surfaces (pygame_sdl2, Ren'Py) would
++           otherwise convert the 24-bit result to, a whole extra pass. */
++        vars->cinfo.out_color_space = JCS_EXT_RGBA;
++#else
+         /* Set 24-bit RGB output */
+         vars->cinfo.out_color_space = JCS_RGB;
++#endif
+         vars->cinfo.quantize_colors = FALSE;
+ #ifdef FAST_JPEG
+         vars->cinfo.scale_num   = 1;
+@@ -386,7 +393,11 @@
+         lib.jpeg_calc_output_dimensions(&vars->cinfo);
+ 
+         /* Allocate an output surface to hold the image */
++#ifdef JCS_EXTENSIONS
++        vars->surface = SDL_CreateRGBSurfaceWithFormat(0, vars->cinfo.output_width, vars->cinfo.output_height, 0, SDL_PIXELFORMAT_RGBA32);
++#else
+         vars->surface = SDL_CreateRGBSurfaceWithFormat(0, vars->cinfo.output_width, vars->cinfo.output_height, 0, SDL_PIXELFORMAT_RGB24);
++#endif
+     }
+ 
+     if (!vars->surface) {

@@ -1,0 +1,15 @@
+--- a/src/file/SDL_rwops.c	2026-10-30 11:31:10.313474804 +0000
++++ b/src/file/SDL_rwops.c	2026-10-30 11:31:10.319474828 +0000
+@@ -643,6 +643,12 @@
+             fp = NULL;
+             SDL_SetError("%s is not a regular file or pipe", file);
+         } else {
++#ifdef __VITA__
++            /* newlib's stdio buffer defaults to BUFSIZ (1 KB) here, so a
++               large fread became one sceIoRead per KB (~0.3 ms each): a
++               756 KB file took ~220 ms instead of ~60 ms read directly. */
++            setvbuf(fp, NULL, _IOFBF, 64 * 1024);
++#endif
+             rwops = SDL_RWFromFP(fp, SDL_TRUE);
+         }
+     }

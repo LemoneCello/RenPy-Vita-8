@@ -1,0 +1,247 @@
+--- a/src/IMG_jpg.c	2026-10-30 13:33:21.114362406 +0000
++++ b/src/IMG_jpg.c	2026-10-30 13:43:49.461914831 +0000
+@@ -418,6 +418,228 @@
+     return SDL_TRUE;
+ }
+ 
++#if defined(__vita__)
++/* PS Vita: decodes with the hardware JPEG decoder (SceJpegUser) on threads
++   other than the main one, i.e. a game's background image loading. The
++   hardware needs ~50 ms for a 960x540 image but almost no CPU; reading its
++   output back would cost ~26 ms of CPU (it must be in CDRAM, uncached for
++   the CPU), so the DMA controller copies it into the surface: ~58 ms wall
++   and ~3.5 ms of CPU, against ~39 ms, all CPU, for libjpeg-turbo (NEON).
++   On the main thread the longer wall time would only delay frames, so
++   libjpeg-turbo is used there. Only baseline 4:2:0 and 4:2:2 images are
++   taken; everything else, and any error, falls back to libjpeg-turbo. The environment variable
++   VITA_JPEG_HW selects "0" (never) or "all" (main thread too).
++
++   VitaSDK documents none of this; found by probing on the Vita (2026-10-30):
++   every buffer (input, temporary, output) has to be in CDRAM, output format
++   0 is RGBA, its rows are pitch[0].x bytes apart and its height is padded
++   to 16. VitaSDK's header has sceJpegDecodeMJpegYCbCr's arguments in the
++   wrong order and no sceJpegDecodeMJpeg, hence the declarations here. */
++#include <stdlib.h>
++#include <string.h>
++#include <psp2/kernel/sysmem.h>
++#include <psp2/kernel/threadmgr.h>
++#include <psp2/kernel/dmac.h>
++
++typedef struct {
++    SceInt32 colorSpace;
++    SceUInt16 width;
++    SceUInt16 height;
++    SceUInt32 outputSize;
++    SceUInt32 tempSize;
++    SceUInt32 coefSize;
++    struct { SceUInt32 x, y; } pitch[4];
++} VitaJpegOutputInfo;
++
++int sceJpegInitMJpeg(SceInt32 decoderCount);
++int sceJpegGetOutputInfo(const void *jpeg, SceSize size, SceInt32 format, SceInt32 mode, VitaJpegOutputInfo *info);
++int sceJpegDecodeMJpeg(const void *jpeg, SceSize size, void *rgba, SceSize rgba_size, SceInt32 mode,
++                       void *temp, SceSize temp_size, void *coef, SceSize coef_size);
++
++#define VITA_JPEG_CS_420 0x20202
++#define VITA_JPEG_CS_422 0x20201
++/* Larger inputs and outputs fall back; blocks above the keep sizes are
++   freed after each decode, so CDRAM isn't held for the odd large image. */
++#define VITA_JPEG_MAX_INPUT (8 << 20)
++#define VITA_JPEG_MAX_OUTPUT (16 << 20)
++#define VITA_JPEG_KEEP_INPUT (1 << 20)
++#define VITA_JPEG_KEEP_OUTPUT (4 << 20)
++
++typedef struct {
++    SceUID uid;
++    void *base;
++    size_t size;
++} VitaJpegBlock;
++
++static VitaJpegBlock vita_jpeg_in = { -1, NULL, 0 };
++static VitaJpegBlock vita_jpeg_out = { -1, NULL, 0 };
++static VitaJpegBlock vita_jpeg_temp = { -1, NULL, 0 };
++static SDL_SpinLock vita_jpeg_lock;
++static int vita_jpeg_state; /* 0 untried, 1 ready, -1 unusable */
++static SceUID vita_jpeg_main_thread = -1;
++
++/* Constructors run on the main thread, before main(). */
++static void __attribute__((constructor)) vita_jpeg_note_main_thread(void)
++{
++    vita_jpeg_main_thread = sceKernelGetThreadId();
++}
++
++static void vita_jpeg_free(VitaJpegBlock *b)
++{
++    if (b->uid >= 0) {
++        sceKernelFreeMemBlock(b->uid);
++    }
++    b->uid = -1;
++    b->base = NULL;
++    b->size = 0;
++}
++
++static SDL_bool vita_jpeg_reserve(VitaJpegBlock *b, size_t size)
++{
++    SceUID uid;
++
++    if (b->uid >= 0 && b->size >= size) {
++        return SDL_TRUE;
++    }
++
++    vita_jpeg_free(b);
++
++    /* CDRAM blocks come in multiples of 256 KiB. */
++    size = (size + 0x3FFFF) & ~(size_t) 0x3FFFF;
++    uid = sceKernelAllocMemBlock("SDL_image JPEG", SCE_KERNEL_MEMBLOCK_TYPE_USER_CDRAM_RW, size, NULL);
++    if (uid < 0) {
++        return SDL_FALSE;
++    }
++
++    if (sceKernelGetMemBlockBase(uid, &b->base) < 0) {
++        sceKernelFreeMemBlock(uid);
++        return SDL_FALSE;
++    }
++
++    b->uid = uid;
++    b->size = size;
++    return SDL_TRUE;
++}
++
++static SDL_Surface *vita_jpeg_decode(SDL_RWops *src, Sint64 start)
++{
++    VitaJpegOutputInfo info;
++    SDL_Surface *surface;
++    Sint64 length;
++    size_t done;
++    SDL_bool copied;
++    int rc, y;
++
++    length = SDL_RWsize(src);
++    if (length < 0) {
++        return NULL;
++    }
++    length -= start;
++    if (length <= 0 || length > VITA_JPEG_MAX_INPUT || !vita_jpeg_reserve(&vita_jpeg_in, (size_t) length)) {
++        return NULL;
++    }
++
++    for (done = 0; done < (size_t) length; ) {
++        size_t n = SDL_RWread(src, (Uint8 *) vita_jpeg_in.base + done, 1, (size_t) length - done);
++        if (n == 0) {
++            return NULL;
++        }
++        done += n;
++    }
++
++    SDL_zero(info);
++    if (sceJpegGetOutputInfo(vita_jpeg_in.base, (SceSize) length, 0, 0, &info) < 0) {
++        return NULL;
++    }
++
++    if ((info.colorSpace != VITA_JPEG_CS_420 && info.colorSpace != VITA_JPEG_CS_422) ||
++        info.coefSize != 0 || info.width == 0 || info.height == 0 ||
++        info.pitch[0].x < (SceUInt32) info.width * 4 || info.pitch[0].y < info.height ||
++        info.outputSize < info.pitch[0].x * info.pitch[0].y ||
++        info.outputSize > VITA_JPEG_MAX_OUTPUT || info.tempSize > VITA_JPEG_MAX_OUTPUT) {
++        return NULL;
++    }
++
++    if (!vita_jpeg_reserve(&vita_jpeg_out, info.outputSize) ||
++        (info.tempSize && !vita_jpeg_reserve(&vita_jpeg_temp, info.tempSize))) {
++        return NULL;
++    }
++
++    rc = sceJpegDecodeMJpeg(vita_jpeg_in.base, (SceSize) length, vita_jpeg_out.base, info.outputSize, 0,
++                            info.tempSize ? vita_jpeg_temp.base : NULL, info.tempSize, NULL, 0);
++    /* Returns (width << 16) | padded height. */
++    if (rc < 0 || (rc >> 16) < info.width) {
++        return NULL;
++    }
++
++    surface = SDL_CreateRGBSurfaceWithFormat(0, info.width, info.height, 0, SDL_PIXELFORMAT_RGBA32);
++    if (!surface) {
++        return NULL;
++    }
++
++    /* DMA leaves the CPU free (3.5 instead of ~30 ms of CPU for 960x540,
++       and faster); the CPU copies if the DMA controller refuses. */
++    if ((SceUInt32) surface->pitch == info.pitch[0].x) {
++        copied = sceDmacMemcpy(surface->pixels, vita_jpeg_out.base, (SceSize) surface->pitch * info.height) >= 0;
++    } else {
++        copied = SDL_TRUE;
++        for (y = 0; y < info.height && copied; y++) {
++            copied = sceDmacMemcpy((Uint8 *) surface->pixels + y * surface->pitch,
++                                   (const Uint8 *) vita_jpeg_out.base + y * info.pitch[0].x, (SceSize) info.width * 4) >= 0;
++        }
++    }
++
++    if (!copied) {
++        for (y = 0; y < info.height; y++) {
++            SDL_memcpy((Uint8 *) surface->pixels + y * surface->pitch,
++                       (const Uint8 *) vita_jpeg_out.base + y * info.pitch[0].x, (size_t) info.width * 4);
++        }
++    }
++
++    return surface;
++}
++
++/* Returns the decoded image, or NULL (and the stream back at start) for
++   libjpeg-turbo to decode instead. */
++static SDL_Surface *VITA_LoadJPG_RW(SDL_RWops *src, Sint64 start)
++{
++    const char *mode = SDL_getenv("VITA_JPEG_HW");
++    SDL_Surface *surface = NULL;
++
++    if (mode && SDL_strcmp(mode, "0") == 0) {
++        return NULL;
++    }
++    if (sceKernelGetThreadId() == vita_jpeg_main_thread && !(mode && SDL_strcmp(mode, "all") == 0)) {
++        return NULL;
++    }
++    if (vita_jpeg_state < 0 || !SDL_AtomicTryLock(&vita_jpeg_lock)) {
++        return NULL;
++    }
++
++    if (vita_jpeg_state == 0) {
++        vita_jpeg_state = sceJpegInitMJpeg(1) < 0 ? -1 : 1;
++    }
++    if (vita_jpeg_state > 0) {
++        surface = vita_jpeg_decode(src, start);
++
++        if (vita_jpeg_in.size > VITA_JPEG_KEEP_INPUT) {
++            vita_jpeg_free(&vita_jpeg_in);
++        }
++        if (vita_jpeg_out.size + vita_jpeg_temp.size > VITA_JPEG_KEEP_OUTPUT) {
++            vita_jpeg_free(&vita_jpeg_out);
++            vita_jpeg_free(&vita_jpeg_temp);
++        }
++    }
++
++    SDL_AtomicUnlock(&vita_jpeg_lock);
++
++    if (!surface) {
++        SDL_RWseek(src, start, RW_SEEK_SET);
++    }
++    return surface;
++}
++#endif /* __vita__ */
++
+ SDL_Surface *IMG_LoadJPG_RW(SDL_RWops *src)
+ {
+     Sint64 start;
+@@ -435,6 +657,15 @@
+     start = SDL_RWtell(src);
+     SDL_zero(vars);
+ 
++#if defined(__vita__)
++    {
++        SDL_Surface *surface = VITA_LoadJPG_RW(src, start);
++        if (surface) {
++            return surface;
++        }
++    }
++#endif
++
+     if (LIBJPEG_LoadJPG_RW(src, &vars)) {
+         return vars.surface;
+     }

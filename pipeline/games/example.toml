@@ -1,0 +1,27 @@
+# Settings for one game, used by vita_pipeline.py (see README.md). Copy this
+# file, adjust the paths, and run:
+#
+#   uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml
+#
+# Paths are relative to the workspace (the current directory). Only use the
+# pipeline on games you own, and never distribute the processed files.
+
+[game]
+title_id = "ABCD00001"            # app folder ux0:app/ABCD00001 (9 uppercase letters/digits)
+# title = "My Game"               # default: config.name from the game's scripts
+dir = "MyGame-1.0-pc/game"        # the PC release's game/ directory
+renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs vita_story.py)
+
+[build]
+port_build = "build/port/zc"      # vita_port_build.py output
+# root = "build/games"            # where outputs go
+
+# --variant slice: a quick test build with only some folders, plus whatever
+# the given scripts use.
+[slice]
+include = ["images/01/", "gui/"]
+referenced_by = ["script.rpy"]
+
+# Extra arguments per stage, e.g.
+# [stages.video]
+# args = ["--crf", "20.2"]

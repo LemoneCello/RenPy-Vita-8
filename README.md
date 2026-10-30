@@ -3,6 +3,14 @@ This is an updated version of [SonicMastr's Ren'Py 7 Vita port](https://github.c
 
 As of v0.2.1 release, [VitaGL](https://github.com/Rinnegatamante/vitaGL) can be used as an alternative solution for OpenGL handling and there is a seperate release for it in the [release section](https://github.com/Grimiku/RenPy-Vita-8/releases). Please do check out the [vitagl branch](https://github.com/Grimiku/RenPy-Vita-8/tree/vitagl) for more details.
 
+## This fork: `vita-perf` and a Ren'Py → Vita pipeline
+The `vita-perf` branch of this fork (with matching `vita-perf` branches in the `renpy-8` and `pygame_sdl2` submodules) adds performance work and fixes for the PVR build:
+- a hardware movie player that can play two movies at once
+- much faster Python, image loading and boot
+- fixes for crashes and hangs
+
+It also adds [`pipeline/`](pipeline/README.md): scripts that turn a Ren'Py game's PC release into a complete Vita app and upload it. They extract and convert the assets, build the app folder, and include the eboot build from source. See [pipeline/README.md](pipeline/README.md).
+
 ## Instructions for regular users
 This repo presupposes that you have your Ren'Py game already installed on the Vita. Please use the [Ren'Py PSVita Distribution Tool](https://github.com/SonicMastr/renpy-vita/releases/tag/v1.0) to create your VPK if you haven't done it yet and install your game before proceeding.
 

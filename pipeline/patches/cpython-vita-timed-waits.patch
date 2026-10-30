@@ -1,0 +1,59 @@
+diff --git a/Python/thread_pthread.h b/Python/thread_pthread.h
+index 40c6f62abc..4cd3db89fe 100644
+--- a/Python/thread_pthread.h
++++ b/Python/thread_pthread.h
+@@ -134,8 +134,11 @@ do { \
+  * pthread_cond support
+  */
+ 
+-#if defined(HAVE_PTHREAD_CONDATTR_SETCLOCK) && defined(HAVE_CLOCK_GETTIME) && defined(CLOCK_MONOTONIC)
++#if defined(HAVE_PTHREAD_CONDATTR_SETCLOCK) && defined(HAVE_CLOCK_GETTIME) && defined(CLOCK_MONOTONIC) && !defined(__vita__)
+ // monotonic is supported statically.  It doesn't mean it works on runtime.
++// (Not on the Vita: pthread-embedded accepts CLOCK_MONOTONIC in
++// pthread_condattr_setclock() but its timed waits always read the deadline
++// as CLOCK_REALTIME, so every timed wait would expire at once.)
+ #define CONDATTR_MONOTONIC
+ #endif
+ 
+@@ -174,6 +177,18 @@ _PyThread_cond_after(long long us, struct timespec *abs)
+     }
+ #endif
+ 
++#ifdef __vita__
++    // The clock pthread-embedded converts deadlines with (pte_relmillisecs()
++    // -> ftime() -> clock_gettime(CLOCK_REALTIME)); gettimeofday() is a
++    // different system call.
++    clock_gettime(CLOCK_REALTIME, abs);
++    abs->tv_sec  += us / 1000000;
++    abs->tv_nsec += (us % 1000000) * 1000;
++    abs->tv_sec  += abs->tv_nsec / 1000000000;
++    abs->tv_nsec %= 1000000000;
++    return;
++#endif
++
+     struct timespec ts;
+     MICROSECONDS_TO_TIMESPEC(us, ts);
+     *abs = ts;
+@@ -217,6 +232,11 @@ PyThread__init_thread(void)
+     pthread_init();
+ #endif
+     init_condattr();
++#ifdef __vita__
++    // With cancellation enabled (the default), pthread-embedded waits by
++    // polling the semaphore every 0.5 ms; Python never cancels threads.
++    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
++#endif
+ }
+ 
+ /*
+@@ -242,6 +262,10 @@ pythread_wrapper(void *arg)
+     void *func_arg = callback->arg;
+     PyMem_RawFree(arg);
+ 
++#ifdef __vita__
++    pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
++#endif
++
+     func(func_arg);
+     return NULL;
+ }

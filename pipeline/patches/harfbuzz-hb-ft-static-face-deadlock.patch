@@ -1,0 +1,36 @@
+--- a/src/hb-ft.cc	2026-10-29 01:35:24.363542620 +0000
++++ b/src/hb-ft.cc	2026-10-29 01:35:24.370542647 +0000
+@@ -1594,11 +1594,31 @@
+ 
+ static hb_user_data_key_t ft_library_key = {0};
+ 
++static void _release_blob (void *arg);
++
+ static void
+ _hb_ft_face_destroy_static (void *data)
+ {
+-  hb_lock_t lock (static_ft_library_mutex.get_unconst ());
+-  FT_Done_Face ((FT_Face) data);
++  FT_Face ft_face = (FT_Face) data;
++
++  /* The face's finalizer (_release_blob) may drop the last reference to the
++   * blob, whose user data (destroy_ft_library) takes static_ft_library_mutex
++   * again: a self-deadlock with a non-recursive mutex. Detach the blob and
++   * release it after unlocking. */
++  hb_blob_t *blob = nullptr;
++  if (ft_face->generic.finalizer == (FT_Generic_Finalizer) _release_blob)
++  {
++    blob = (hb_blob_t *) ft_face->generic.data;
++    ft_face->generic.finalizer = nullptr;
++    ft_face->generic.data = nullptr;
++  }
++
++  {
++    hb_lock_t lock (static_ft_library_mutex.get_unconst ());
++    FT_Done_Face (ft_face);
++  }
++
++  hb_blob_destroy (blob);
+ }
+ 
+ static FT_Error

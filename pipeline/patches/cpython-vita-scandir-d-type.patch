@@ -1,0 +1,37 @@
+--- a/Modules/posixmodule.c	2026-10-30 03:04:32.298902770 +0000
++++ b/Modules/posixmodule.c	2026-10-30 03:04:32.310902817 +0000
+@@ -13564,6 +13564,23 @@
+ [clinic start generated code]*/
+ /*[clinic end generated code: output=da39a3ee5e6b4b0d input=3c18c7a448247980]*/
+ 
++#ifdef __vita__
++/* The Vita's readdir() returns each entry's SceIoStat (struct dirent's
++   d_stat), so DirEntry can know an entry's type without a stat per entry
++   (~4 ms each on the memory card), as with d_type elsewhere. */
++#  define HAVE_DIRENT_D_TYPE 1
++#  ifndef DT_UNKNOWN
++#    define DT_UNKNOWN 0
++#    define DT_DIR 4
++#    define DT_REG 8
++#    define DT_LNK 10
++#  endif
++#  define VITA_DIRENT_TYPE(ep) \
++    (SCE_S_ISDIR((ep)->d_stat.st_mode) ? DT_DIR : \
++     SCE_S_ISREG((ep)->d_stat.st_mode) ? DT_REG : \
++     SCE_S_ISLNK((ep)->d_stat.st_mode) ? DT_LNK : DT_UNKNOWN)
++#endif
++
+ typedef struct {
+     PyObject_HEAD
+     PyObject *name;
+@@ -14302,7 +14319,9 @@
+ #ifndef __vita__
+                                             , direntp->d_ino
+ #endif
+-#ifdef HAVE_DIRENT_D_TYPE
++#if defined(__vita__)
++                                             , VITA_DIRENT_TYPE(direntp)
++#elif defined(HAVE_DIRENT_D_TYPE)
+                                              , direntp->d_type
+ #endif
+                                             );

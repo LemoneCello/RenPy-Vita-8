@@ -1,0 +1,44 @@
+--- a/src/video/vita/SDL_vitavideo.c	2026-10-29 23:13:27.343734164 +0000
++++ b/src/video/vita/SDL_vitavideo.c	2026-10-29 23:13:27.350734191 +0000
+@@ -429,6 +429,10 @@
+ 
+ #if defined(SDL_VIDEO_VITA_PVR)
+ SceWChar16 libime_out[SCE_IME_MAX_PREEDIT_LENGTH + SCE_IME_MAX_TEXT_LENGTH + 1];
++/* The IME uses its work buffer until sceImeClose, so it can't live on the
++   stack of VITA_ShowScreenKeyboard (it was a local array there: the next
++   sceImeUpdate ran on reused stack and crashed). */
++static SceUInt32 libime_work[SCE_IME_WORK_BUFFER_SIZE / sizeof(SceInt32)];
+ char libime_initval[8] = { 1 };
+ SceImeCaret caret_rev;
+ 
+@@ -474,9 +478,13 @@
+ 
+ #if defined(SDL_VIDEO_VITA_PVR)
+ 
+-    SceUInt32 libime_work[SCE_IME_WORK_BUFFER_SIZE / sizeof(SceInt32)];
+     SceImeParam param;
+ 
++    /* Already open: opening it again fails or corrupts its state. */
++    if (videodata->ime_active) {
++        return;
++    }
++
+     sceImeParamInit(&param);
+ 
+     SDL_memset(libime_out, 0, ((SCE_IME_MAX_PREEDIT_LENGTH + SCE_IME_MAX_TEXT_LENGTH + 1) * sizeof(SceWChar16)));
+@@ -530,7 +538,14 @@
+ 
+ void VITA_HideScreenKeyboard(_THIS, SDL_Window *window)
+ {
+-#if !defined(SDL_VIDEO_VITA_PVR)
++#if defined(SDL_VIDEO_VITA_PVR)
++    SDL_VideoData *videodata = (SDL_VideoData *)_this->driverdata;
++
++    if (videodata->ime_active) {
++        sceImeClose();
++        videodata->ime_active = SDL_FALSE;
++    }
++#else
+     SDL_VideoData *videodata = (SDL_VideoData *)_this->driverdata;
+ 
+     SceCommonDialogStatus dialogStatus = sceImeDialogGetStatus();
