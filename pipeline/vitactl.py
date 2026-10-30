@@ -189,7 +189,10 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False):
     local = {p.relative_to(local_dir).as_posix(): p for p in sorted(local_dir.rglob("*")) if p.is_file()}
 
     with ftp() as f:
-        on_vita = dict(walk_remote(f, remote_dir))
+        try:
+            on_vita = dict(walk_remote(f, remote_dir))
+        except ftplib.error_perm:
+            on_vita = {}   # the destination doesn't exist yet (a first deploy)
 
     uploads = []
     for rel, path in local.items():
@@ -223,6 +226,14 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False):
 
     made = set()
     with ftp() as f, progress("Uploading", total=total, unit="bytes") as bar:
+        # The destination itself may not exist yet (a first deploy).
+        device, _, folder = remote_dir.partition(":")
+        parts = [p for p in folder.split("/") if p]
+        for i in range(1, len(parts) + 1):
+            try:
+                f.mkd(remote(f"{device}:{'/'.join(parts[:i])}"))
+            except ftplib.error_perm:
+                pass
         for rel, path, digest, _ in uploads:
             parent = PurePosixPath(rel).parent
             for d in reversed([parent] + list(parent.parents)):
