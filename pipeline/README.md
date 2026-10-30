@@ -89,6 +89,8 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
    uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml --deploy
    ```
 
+   After a run that wrote the VPK, `--stages deploy` uploads the same build without redoing anything. An uploaded folder isn't registered with the system, though: if the game isn't installed on the Vita yet, no bubble appears. Install the VPK the first time and deploy updates after that, or run VitaShell's "Refresh LiveArea" after the first deploy.
+
 | Stage | Script | Does |
 |---|---|---|
 | `extract` | `vita_extract.py` | Takes the files out of the game's archives. Movies go to a separate tree. |
