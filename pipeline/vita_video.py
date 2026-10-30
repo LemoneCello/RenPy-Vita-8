@@ -154,6 +154,25 @@ def duration(path):
         return 0.0
 
 
+def frame_count(path):
+    """The number of video frames (duration x frame rate), for the progress
+    bar: encoding time goes with frames, as every movie ends up the same size.
+    A guess (30 s at 30 fps) if the file can't be probed."""
+    result = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                             "-show_entries", "stream=avg_frame_rate:format=duration", "-of", "default=nw=1",
+                             str(path)], capture_output=True, text=True)
+    fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    try:
+        num, _, den = fields["avg_frame_rate"].partition("/")
+        fps = float(num) / float(den or 1)
+        frames = float(fields["duration"]) * fps
+        if frames > 0:
+            return frames
+    except (KeyError, ValueError, ZeroDivisionError):
+        pass
+    return 30 * 30
+
+
 def encode(src, dest, size, crf, preset, profile, repeat=1):
     w, h = size
     tmp = dest.with_suffix(".part.mp4")
@@ -268,8 +287,12 @@ def main(argv):
         p.unlink()
 
     print(f"{len(expected)} videos, {len(jobs)} to encode at {size[0]}x{size[1]}, {len(stale)} stale removed")
+    with ThreadPoolExecutor(max(4, args.jobs)) as pool:
+        frames = {src: n * repeat_of(src) for (src, _dest), n in zip(jobs, pool.map(frame_count, [s for s, _ in jobs]))}
+
     failed = 0
-    with ThreadPoolExecutor(args.jobs) as pool, progress("Encoding movies", total=len(jobs)) as bar:
+    with ThreadPoolExecutor(args.jobs) as pool, \
+            progress(f"Encoding {len(jobs)} movies (frames)", total=round(sum(frames.values()))) as bar:
         futures = [pool.submit(encode, src, dest, size, args.crf, args.preset, args.profile, repeat_of(src))
                    for src, dest in jobs]
         for fut in as_completed(futures):
@@ -281,7 +304,7 @@ def main(argv):
                 failed += 1
                 old_repeats.pop(name, None)
                 bar.log(f"  FAILED {src}: {err}")
-            bar.advance(1, current=name)
+            bar.advance(round(frames[src]), current=name)
     names_now = {src.relative_to(args.src).as_posix() for src, _dest in candidates}
     recorded = {n: k for n, k in sorted(old_repeats.items()) if n in names_now and k != 1}
     args.dest.mkdir(parents=True, exist_ok=True)
