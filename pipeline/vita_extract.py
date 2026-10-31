@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = ["rich"]
 # ///
-"""Extract stage: pull the files a Vita build needs out of a game's .rpa.
+"""Extract stage: pull the files a Vita build needs out of a game's .rpa archives.
 
 Always extracts what Ren'Py needs to boot: scripts, fonts, gui/, translations
 and files in game/'s root. Optionally adds:
@@ -26,7 +26,9 @@ lower-cased base name, so a file missing from the build turns such a
 reference into an AttributeError, not just a missing sound.
 
 Video files go to --videos (for vita_video.py), not into game/. Loose files
-next to the archive in the game's directory are copied too.
+next to the archives in the game's directory are copied too. A game may have
+several archives (e.g. images.rpa, audio.rpa); a file in more than one comes
+from the first by name, as Ren'Py searches them in that order.
 
   uv run vita_extract.py --game MyGame-1.0-pc/game \\
       --include images/01/ --include images/MENUS/ --referenced-by script.rpy
@@ -70,12 +72,24 @@ def boot_file(name):
     return len(p.parts) == 1 or p.parts[0] in BOOT_DIRS
 
 
-def script_text(index, archive, game_dir, name):
+def read_archives(archives):
+    """{name: (archive, offset, length, prefix)} over all archives; the first holding a name wins."""
+    index, duplicates = {}, 0
+    for archive in archives:
+        for name, entry in read_rpa_index(archive).items():
+            if name in index:
+                duplicates += 1
+            else:
+                index[name] = (archive, *entry)
+    return index, duplicates
+
+
+def script_text(index, game_dir, name):
     """Source of a .rpy, from the game dir or the archive."""
     loose = game_dir / name
     if loose.exists():
         return loose.read_text(encoding="utf-8", errors="replace")
-    off, length, prefix = index[name]
+    archive, off, length, prefix = index[name]
     with open(archive, "rb") as a:
         a.seek(off)
         return (prefix + a.read(length)).decode("utf-8", errors="replace")
@@ -174,10 +188,12 @@ def main(argv):
     args = ap.parse_args(argv)
 
     archives = sorted(args.game.glob("*.rpa"))
-    if len(archives) != 1:
-        sys.exit(f"expected one .rpa in {args.game}, found {len(archives)}")
-    archive = archives[0]
-    index = read_rpa_index(archive)
+    if not archives:
+        sys.exit(f"no .rpa archives in {args.game}")
+    index, duplicates = read_archives(archives)
+    print(f"{len(index)} files in {len(archives)} archive{'s' * (len(archives) > 1)}: "
+          + ", ".join(a.name for a in archives)
+          + (f" ({duplicates} also in an earlier archive, ignored there)" if duplicates else ""))
 
     selected = {n for n in index if args.all or boot_file(n)}
     reasons = Counter({"boot": len(selected)})
@@ -188,14 +204,14 @@ def main(argv):
         selected |= add
 
     rpys = [n for n in index if n.endswith(".rpy")]
-    all_texts = [script_text(index, archive, args.game, n) for n in rpys]
+    all_texts = [script_text(index, args.game, n) for n in rpys]
 
     add = audio_namespace(all_texts, index)
     reasons["audio namespace"] += len(add - selected)
     selected |= add
 
     if args.referenced_by:
-        texts = [script_text(index, archive, args.game, n) for n in args.referenced_by]
+        texts = [script_text(index, args.game, n) for n in args.referenced_by]
         add = references(texts, index, all_texts)
         reasons["referenced"] += len(add - selected)
         selected |= add
@@ -203,11 +219,11 @@ def main(argv):
     videos = {n for n in selected if PurePosixPath(n).suffix.lower() in VIDEO_EXTS}
     game_files = selected - videos
 
-    size = lambda names: sum(index[n][1] + len(index[n][2]) for n in names)
+    size = lambda names: sum(index[n][2] + len(index[n][3]) for n in names)
     by_kind = Counter()
     for n in game_files:
         p = PurePosixPath(n)
-        by_kind[p.parts[0] if len(p.parts) > 1 else "(root)"] += index[n][1]
+        by_kind[p.parts[0] if len(p.parts) > 1 else "(root)"] += index[n][2]
     print(f"{len(game_files)} files for game/ ({mib(size(game_files))}), {len(videos)} videos ({mib(size(videos))})")
     for why, n in reasons.items():
         print(f"  {n:6}  {why}")
@@ -224,7 +240,7 @@ def main(argv):
         loose.append((path, (args.videos if path.suffix.lower() in VIDEO_EXTS else args.out) / rel))
 
     # Files from an earlier run are kept when they're still wanted and
-    # unchanged (same size, written since the archive was), so their
+    # unchanged (same size, written since their archive was), so their
     # modification times stay put and later stages (vita_video.py) don't
     # redo them. Anything no longer selected is removed.
     wanted = {(args.videos if n in videos else args.out) / n for n in selected} | {dest for _path, dest in loose}
@@ -236,22 +252,26 @@ def main(argv):
             elif p.is_dir() and not any(p.iterdir()):
                 p.rmdir()
 
-    archive_mtime = Path(archive).stat().st_mtime
     kept = 0
-    with open(archive, "rb") as a, progress("Extracting", total=len(selected)) as bar:
-        for n in sorted(selected):
-            off, length, prefix = index[n]
-            dest = (args.videos if n in videos else args.out) / n
-            try:
-                st = dest.stat()
-                current = st.st_size == length + len(prefix) and st.st_mtime >= archive_mtime
-            except OSError:
-                current = False
-            if current:
-                kept += 1
-            else:
-                extract_entry(a, off, length, prefix, dest)
-            bar.advance(1, current=n)
+    with progress("Extracting", total=len(selected)) as bar:
+        # One archive at a time, each in offset order.
+        for archive in archives:
+            archive_mtime = archive.stat().st_mtime
+            names = sorted((n for n in selected if index[n][0] == archive), key=lambda n: index[n][1])
+            with open(archive, "rb") as a:
+                for n in names:
+                    _, off, length, prefix = index[n]
+                    dest = (args.videos if n in videos else args.out) / n
+                    try:
+                        st = dest.stat()
+                        current = st.st_size == length + len(prefix) and st.st_mtime >= archive_mtime
+                    except OSError:
+                        current = False
+                    if current:
+                        kept += 1
+                    else:
+                        extract_entry(a, off, length, prefix, dest)
+                    bar.advance(1, current=n)
     print(f"  {kept} unchanged from an earlier run")
 
     for path, dest in loose:
