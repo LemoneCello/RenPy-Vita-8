@@ -1,6 +1,9 @@
 # Ren'Py → PS Vita pipeline
 
-Turns a Ren'Py game's PC release into a PS Vita app for this port (RenPy-Vita-8, PVR build), and makes it run well. Each step is a separate script; one command runs them all. It was developed on one large commercial Ren'Py 8.3 game ("the test game" in the code comments): about 140,000 script statements, 13,000 images and 449 movies. It hasn't been tried on others yet, but the fixes are meant to be generic.
+Turns a Ren'Py game's PC release into a PS Vita app for this port (RenPy-Vita-8, PVR build), and makes it run well. Each step is a separate script; one command runs them all. The fixes are meant to be generic. Tested on:
+
+- **Eternum 0.9.5** (Ren'Py 8.3, 1920×1080; "the test game" in older code comments and commits): about 140,000 script statements, 13,000 images and 449 movies. The figures below are for this game.
+- **Doki Doki Literature Club! 1.1.1** (Ren'Py 6.99, Python 2, 1280×720, compiled scripts only): in progress. The pipeline builds it; the Python 2 fixes it needs on the Vita are being worked on.
 
 On the Vita, that game boots in about 35 s and dialogue advances in about 100 ms. Its 60 fps movies play on the Vita's hardware decoder, including two at once.
 
@@ -132,11 +135,11 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 | `fonts` | `vita_fonts.py` | Cuts fonts above 1 MB down to the characters the scripts use. |
 | `presplash` | `vita_presplash_build.py` | Prepares the loading screen. Images much smaller than the screen are enlarged with Real-ESRGAN (`vita_upscale.py`). |
 | `sce_sys` | `vita_sce_sys.py` | Writes `param.sfo`, the bubble icon and LiveArea art, and the package header (`package/head.bin`) the system needs to register the app. The art is the game's loading screen (its `presplash` images), else its main menu art, unless the settings file names other pictures: `art` for all three places, or `art_icon` (the bubble, 128×128), `art_background` (the LiveArea, 840×500) and `art_start` (the picture on the LiveArea's start button, 280×158) for one each. Pictures are scaled and centre-cropped to those sizes, so one with the same shape works best. |
-| `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for the test game). It runs under the game's desktop Ren'Py, which must be Ren'Py 8; for an older game, `story_renpy` can name any Ren'Py 8 desktop build, and without one the split is skipped. |
+| `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for Eternum). It runs under the game's desktop Ren'Py, which must be Ren'Py 8; for an older game, `story_renpy` can name any Ren'Py 8 desktop build, and without one the split is skipped. |
 | `build` | `vita_build.py` | Assembles the app folder: port files, eboot, game, overlays and `rpy/` hooks. Packs assets into archives, because loose files are slow on the Vita. Writes the VPK. |
 | `deploy` | `vitactl.py sync` | Only with `--deploy` or `--usb`, or when named in `--stages`: sends only what changed to `ux0:app/TITLE_ID`, over Wi-Fi, USB or a card reader, and registers a new game (over Wi-Fi; otherwise it says how). |
 
-The app folder ends up in `<root>/<TITLE_ID>/full/app/<TITLE_ID>`, next to the VPK. Reruns only redo what changed: extracting, movies and images skip files that haven't changed since the last run, and the VPK is only rewritten when the app's contents changed. The first full run for the test game takes about 20 minutes, mostly encoding its 449 movies. A rerun with nothing changed takes about 20 s. Its VPK is 3.0 GiB and takes about 10 s to write.
+The app folder ends up in `<root>/<TITLE_ID>/full/app/<TITLE_ID>`, next to the VPK. Reruns only redo what changed: extracting, movies and images skip files that haven't changed since the last run, and the VPK is only rewritten when the app's contents changed. The first full run for Eternum takes about 20 minutes, mostly encoding its 449 movies. A rerun with nothing changed takes about 20 s. Its VPK is 3.0 GiB and takes about 10 s to write.
 
 | Option | Does |
 |---|---|

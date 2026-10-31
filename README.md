@@ -28,7 +28,7 @@ Measured on a PS Vita with one large commercial Ren'Py 8.3 game: ~140,000 script
 | **Getting a game onto the Vita** | | |
 | Making the app | By hand: build a VPK with SonicMastr's distribution tool, install it, then unpack the port's zip over it | One command turns the PC release into a VPK, or uploads it to the Vita |
 | Building the eboot from source | Rough notes; the libraries are set up by hand | Scripted, with pinned versions and checksums (~7 min), then one build command |
-| Memory | 180 MB heap: the test game ran out ("Out of memory" in place of images) | 250 MB heap |
+| Memory | 180 MB heap: Eternum 0.9.5 ran out ("Out of memory" in place of images) | 250 MB heap |
 | Loading screen | Ren'Py's presplash crashes the port, so the screen stays blank | Loading image with a progress bar |
 | **Speed** | | |
 | Boot | ~170 s, then out of memory (first episode only) | ~35 s (whole game) |
