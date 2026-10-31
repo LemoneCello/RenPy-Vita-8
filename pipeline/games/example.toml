@@ -11,9 +11,10 @@ title_id = "ABCD00001"            # app folder ux0:app/ABCD00001 (9 uppercase le
 # title = "My Game"               # default: config.name from the game's scripts
 # art = "livearea.png"            # bubble icon and LiveArea pictures (default: the game's
                                   # loading screen, else its main menu art)
-# art_icon = "icon.png"           # or one picture per place, each defaulting to art:
-# art_background = "bg.png"       #   the bubble, the LiveArea background,
-# art_start = "start.png"         #   and the picture on the LiveArea's start button
+# Or one picture per place, each defaulting to art (scaled and centre-cropped to the size shown):
+# art_icon = "icon.png"           # the bubble, 128x128
+# art_background = "bg.png"       # the LiveArea background, 840x500
+# art_start = "start.png"         # the picture on the LiveArea's start button, 280x158
 dir = "MyGame-1.0-pc/game"        # the PC release's game/ directory
 renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs vita_story.py)
 

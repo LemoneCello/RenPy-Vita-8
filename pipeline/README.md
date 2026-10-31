@@ -64,9 +64,9 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
    title_id = "ABCD00001"            # the app's ID: 9 capital letters or digits
    # title = "..."                   # default: the game's config.name
    # art = "livearea.png"            # bubble icon and LiveArea pictures; default: the game's loading screen
-   # art_icon = "icon.png"           # or per place, each defaulting to art: the bubble,
-   # art_background = "bg.png"       #   the LiveArea background,
-   # art_start = "start.png"         #   and the picture on its start button
+   # art_icon = "icon.png"           # or per place, each defaulting to art: the bubble, 128×128
+   # art_background = "bg.png"       #   the LiveArea background, 840×500
+   # art_start = "start.png"         #   the picture on its start button, 280×158
    dir = "MyGame-1.0-pc/game"        # the PC release's game/ folder
    renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs the story stage)
 
