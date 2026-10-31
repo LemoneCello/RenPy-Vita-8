@@ -25,8 +25,8 @@ Stages, in order (each is its own script; see README.md):
   sce_sys    vita_sce_sys.py      param.sfo, icon, LiveArea
   story      vita_story.py        boot/story split of the compiled scripts
   build      vita_build.py        the app folder and its VPK
-  deploy     vitactl.py sync      upload to ux0:app/TITLE_ID (only with --deploy
-                                  or when named in --stages)
+  deploy     vitactl.py sync      copy to ux0:app/TITLE_ID over Wi-Fi or USB (only with
+                                  --deploy or --usb, or when named in --stages)
 
 Outputs go to BUILD_ROOT/TITLE_ID/VARIANT/ (default build/games/...), the app
 to .../app/TITLE_ID. The eboot comes from [build] port_build, made separately
