@@ -12,6 +12,8 @@
 Without a Vita, the result is a VPK (.../TITLE_ID.vpk) to install however you
 like. With --deploy (or deploy named in --stages) the app folder is uploaded
 to the Vita over vitacompanion instead, and no VPK is written unless --vpk.
+With --usb MOUNT it's copied to the Vita's memory card mounted at MOUNT
+(VitaShell's USB mode) instead of over Wi-Fi.
 
 Stages, in order (each is its own script; see README.md):
 
@@ -62,7 +64,7 @@ from pathlib import Path
 STAGES = ["extract", "video", "images", "fonts", "presplash", "sce_sys", "story", "build", "deploy"]
 
 
-def plan(cfg, variant, vpk):
+def plan(cfg, variant, vpk, usb=None):
     game = cfg["game"]
     build = cfg.get("build", {})
     title_id = game["title_id"]
@@ -113,7 +115,8 @@ def plan(cfg, variant, vpk):
         "sce_sys": ["vita_sce_sys.py"] + sce_sys,
         "story": ["vita_story.py", "--renpy", game["renpy"], "--src", d["extract"], "--out", d["story"]],
         "build": ["vita_build.py"] + build_args,
-        "deploy": ["vitactl.py", "sync", d["app"] / title_id, f"ux0:app/{title_id}", "--prune"],
+        "deploy": ["vitactl.py", "sync", d["app"] / title_id, f"ux0:app/{title_id}", "--prune"]
+                  + (["--usb", usb] if usb else []),
     }
 
     # The stage scripts are next to this one; they run in the workspace (the
@@ -130,7 +133,9 @@ def main():
     ap.add_argument("--variant", default="full", help="'full' (default) or a section of the settings file, e.g. slice")
     ap.add_argument("--stages", help="comma-separated stages to run (default: all but deploy)")
     ap.add_argument("--from", dest="start", choices=STAGES, help="run from this stage on")
-    ap.add_argument("--deploy", action="store_true", help="also upload the app to the Vita")
+    ap.add_argument("--deploy", action="store_true", help="also upload the app to the Vita (Wi-Fi)")
+    ap.add_argument("--usb", metavar="MOUNT",
+                    help="deploy by copying to the Vita's memory card mounted at MOUNT (VitaShell's USB mode)")
     ap.add_argument("--vpk", action="store_true", default=None,
                     help="write a VPK (the default unless deploying)")
     ap.add_argument("--no-vpk", dest="vpk", action="store_false", help="don't write a VPK")
@@ -147,13 +152,13 @@ def main():
             sys.exit(f"Unknown stages: {', '.join(unknown)} (known: {', '.join(STAGES)})")
     else:
         stages = STAGES[STAGES.index(args.start):] if args.start else list(STAGES)
-        if not args.deploy:
+        if not (args.deploy or args.usb):
             stages.remove("deploy")
 
     # A VPK unless the app goes to the Vita directly.
     vpk = args.vpk if args.vpk is not None else "deploy" not in stages
 
-    cmds, title_id = plan(cfg, args.variant, vpk)
+    cmds, title_id = plan(cfg, args.variant, vpk, args.usb)
 
     env = dict(os.environ, VITA_TITLE_ID=title_id)
     con = console()

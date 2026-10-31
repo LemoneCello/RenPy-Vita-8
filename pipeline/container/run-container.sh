@@ -11,7 +11,7 @@
 # host network so it can reach the Vita on the vita-ap hotspot, and gets the
 # udcd_uvc webcam if the Vita is plugged in. Home (Claude login, uv cache) lives
 # in a named volume. Names can be changed in vita-container.env in the
-# workspace (VITA_IMAGE, VITA_CONTAINER, VITA_HOME_VOLUME).
+# workspace (VITA_IMAGE, VITA_CONTAINER, VITA_HOME_VOLUME, VITA_MEDIA).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
@@ -42,11 +42,26 @@ else
     echo "note: $VIDEO not present; Vita screen feed unavailable (plug in the USB cable)" >&2
 fi
 
+# Where the host mounts removable drives (VITA_MEDIA overrides), shared as
+# /media/host so the Vita's memory card in VitaShell's USB mode can be used
+# with --usb. rslave: drives mounted after the container starts show up too.
+media_args=()
+MEDIA="${VITA_MEDIA:-}"
+if [[ -z "$MEDIA" ]]; then
+    for d in "/run/media/$USER" "/media/$USER"; do
+        [[ -d "$d" ]] && MEDIA="$d" && break
+    done
+fi
+if [[ -n "$MEDIA" ]]; then
+    media_args=(-v "$MEDIA:/media/host:rslave")
+fi
+
 exec docker run -it --rm \
     --name "$NAME" \
     --hostname "$NAME" \
     --network host \
     "${device_args[@]}" \
+    "${media_args[@]}" \
     -v "$PROJECT:/work" \
     -v "$HOME_VOLUME:/home/dev" \
     -e TZ="$(timedatectl show -p Timezone --value 2>/dev/null || echo UTC)" \

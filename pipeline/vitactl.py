@@ -16,11 +16,15 @@
   uv run vitactl.py mv REMOTE NEW_REMOTE    rename a file
   uv run vitactl.py boottime [OUT_LOG]       launch, wait for Ren'Py's interface, print the
                                             boot stage times from log.txt
-  uv run vitactl.py sync LOCAL_DIR REMOTE_DIR [--dry-run] [--prune]
+  uv run vitactl.py sync LOCAL_DIR REMOTE_DIR [--dry-run] [--prune] [--usb MOUNT]
                                             upload new/changed files, e.g.
                                             sync build/app/ABCD00001 ux0:app/ABCD00001
+                                            With --usb, copy them to the memory card
+                                            mounted at MOUNT (VitaShell's USB mode)
+                                            instead of over Wi-Fi.
 
-Set VITA_HOST to override the default address, VITA_VIDEO the capture device.
+The Vita's address comes from VITA_HOST, else the first line of vita_host.txt
+in the workspace (the current directory). VITA_VIDEO sets the capture device.
 """
 
 import ftplib
@@ -35,8 +39,20 @@ from pathlib import Path, PurePosixPath
 
 from vita_common import progress
 
-HOST = os.environ.get("VITA_HOST", "10.42.0.37")
 CMD_PORT, FTP_PORT = 1338, 1337
+
+
+def vita_host():
+    """The Vita's address: VITA_HOST, else vita_host.txt; exit with a hint if neither is set."""
+    host = os.environ.get("VITA_HOST")
+    if not host and os.path.exists("vita_host.txt"):
+        with open("vita_host.txt") as f:
+            host = f.readline().strip()
+    if not host:
+        sys.exit("The Vita's address isn't set: write it into vita_host.txt in the workspace, or set VITA_HOST.\n"
+                 "The Vita shows it under Settings > Network > Wi-Fi Settings, in the connection's advanced\n"
+                 "settings. vitacompanion must be running on the Vita (commands on port 1338, FTP on 1337).")
+    return host
 # The app to drive: VITA_TITLE_ID (vita_pipeline.py sets it), else the first
 # line of vita_title_id.txt in the workspace (the current directory).
 TITLE_ID = os.environ.get("VITA_TITLE_ID")
@@ -56,7 +72,7 @@ DEFAULT_SHOT_DIR = Path("build/screenshots")
 
 def cmd(line, timeout=60):
     """Send one command line (may chain with ';') and return the reply text."""
-    with socket.create_connection((HOST, CMD_PORT), timeout=10) as s:
+    with socket.create_connection((vita_host(), CMD_PORT), timeout=10) as s:
         s.settimeout(timeout)
         s.sendall(line.encode() + b"\n")
         s.shutdown(socket.SHUT_WR)
@@ -68,7 +84,7 @@ def cmd(line, timeout=60):
 
 def ftp():
     f = ftplib.FTP()
-    f.connect(HOST, FTP_PORT, timeout=30)
+    f.connect(vita_host(), FTP_PORT, timeout=30)
     f.login()
     return f
 
@@ -174,13 +190,119 @@ def file_hash(path):
     return h.hexdigest()
 
 
-def sync(local_dir, remote_dir, dry_run=False, prune=False):
+class FtpCard:
+    """The memory card through vitacompanion's FTP server."""
+
+    def __init__(self, remote_dir):
+        self.dir = remote_dir
+        self.made = set()
+
+    def __enter__(self):
+        self.f = ftp()
+        return self
+
+    def __exit__(self, *exc):
+        self.f.close()
+
+    def files(self):
+        """{relative path: size} of everything under the destination."""
+        try:
+            return dict(walk_remote(self.f, self.dir))
+        except ftplib.error_perm:
+            return {}   # the destination doesn't exist yet (a first deploy)
+
+    def makedirs(self, rel_dir):
+        device, _, folder = f"{self.dir}/{rel_dir}".partition(":")
+        parts = [p for p in folder.split("/") if p not in ("", ".")]
+        for i in range(1, len(parts) + 1):
+            path = f"{device}:{'/'.join(parts[:i])}"
+            if path not in self.made:
+                try:
+                    self.f.mkd(remote(path))
+                except ftplib.error_perm:
+                    pass
+                self.made.add(path)
+
+    def put(self, rel, path, progress_callback):
+        with open(path, "rb") as src:
+            self.f.storbinary(f"STOR {remote(f'{self.dir}/{rel}')}", src,
+                              callback=lambda block: progress_callback(len(block)))
+
+    def delete(self, rel):
+        self.f.delete(remote(f"{self.dir}/{rel}"))
+
+    def rmdir(self, rel_dir):
+        try:
+            self.f.rmd(remote(f"{self.dir}/{rel_dir}"))
+        except ftplib.error_perm:
+            pass   # not empty
+
+    def done(self):
+        pass
+
+
+class MountedCard:
+    """The memory card mounted on this computer, e.g. in VitaShell's USB mode."""
+
+    def __init__(self, mount, remote_dir):
+        device, _, folder = remote_dir.partition(":")
+        if device != "ux0":
+            sys.exit(f"--usb works for ux0: only, not {remote_dir}")
+        root = Path(mount)
+        if not (root / "app").is_dir():
+            sys.exit(f"{mount} doesn't look like the Vita's memory card (no app/ folder): in VitaShell's\n"
+                     f"USB mode, mount the memory card (ux0:) on this computer and pass its mount point.")
+        self.dir = root / folder
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        pass
+
+    def files(self):
+        if not self.dir.is_dir():
+            return {}
+        return {p.relative_to(self.dir).as_posix(): p.stat().st_size for p in self.dir.rglob("*") if p.is_file()}
+
+    def makedirs(self, rel_dir):
+        (self.dir / rel_dir).mkdir(parents=True, exist_ok=True)
+
+    def put(self, rel, path, progress_callback):
+        dest = self.dir / rel
+        tmp = dest.with_name(dest.name + ".part")
+        with open(path, "rb") as src, open(tmp, "wb") as out:
+            while block := src.read(1 << 20):
+                out.write(block)
+                progress_callback(len(block))
+        tmp.replace(dest)
+
+    def delete(self, rel):
+        (self.dir / rel).unlink()
+
+    def rmdir(self, rel_dir):
+        try:
+            (self.dir / rel_dir).rmdir()
+        except OSError:
+            pass   # not empty
+
+    def done(self):
+        # Write everything out before the card is unmounted.
+        os.sync()
+        print("Copied. Unmount (eject) the memory card on this computer before leaving VitaShell's USB mode.")
+
+
+def sync(local_dir, remote_dir, dry_run=False, prune=False, usb=None):
     """
     Uploads files under local_dir that are missing on the Vita, differ in size,
     or changed since the last sync (hashes of uploaded files are kept in
     build/deploy/). With prune, deletes files an earlier sync uploaded (they're
     in the manifest) that the build no longer has; anything else that exists
     only on the Vita (logs, saves, compiled scripts, backups) is never touched.
+
+    Over Wi-Fi (vitacompanion's FTP) by default; with usb, the memory card is
+    mounted at that path on this computer (VitaShell's USB mode) and files are
+    copied there. Both share the record of what's on the card.
     """
     local_dir = Path(local_dir)
     manifest_path = Path("build/deploy") / (remote_dir.replace(":", "_").replace("/", "_") + ".json")
@@ -188,11 +310,9 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False):
 
     local = {p.relative_to(local_dir).as_posix(): p for p in sorted(local_dir.rglob("*")) if p.is_file()}
 
-    with ftp() as f:
-        try:
-            on_vita = dict(walk_remote(f, remote_dir))
-        except ftplib.error_perm:
-            on_vita = {}   # the destination doesn't exist yet (a first deploy)
+    card = MountedCard(usb, remote_dir) if usb else FtpCard(remote_dir)
+    with card:
+        on_vita = card.files()
 
     uploads = []
     for rel, path in local.items():
@@ -224,47 +344,26 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False):
     if dry_run:
         return
 
-    made = set()
-    with ftp() as f, progress("Uploading", total=total, unit="bytes") as bar:
-        # The destination itself may not exist yet (a first deploy).
-        device, _, folder = remote_dir.partition(":")
-        parts = [p for p in folder.split("/") if p]
-        for i in range(1, len(parts) + 1):
-            try:
-                f.mkd(remote(f"{device}:{'/'.join(parts[:i])}"))
-            except ftplib.error_perm:
-                pass
+    with card, progress("Copying" if usb else "Uploading", total=total, unit="bytes") as bar:
+        card.makedirs("")
         for rel, path, digest, _ in uploads:
-            parent = PurePosixPath(rel).parent
-            for d in reversed([parent] + list(parent.parents)):
-                if str(d) in (".", "") or str(d) in made:
-                    continue
-                try:
-                    f.mkd(remote(f"{remote_dir}/{d}"))
-                except ftplib.error_perm:
-                    pass
-                made.add(str(d))
-            with open(path, "rb") as src:
-                f.storbinary(f"STOR {remote(f'{remote_dir}/{rel}')}", src,
-                             callback=lambda block, rel=rel: bar.advance(len(block), current=rel))
+            card.makedirs(PurePosixPath(rel).parent.as_posix())
+            card.put(rel, path, lambda n, rel=rel: bar.advance(n, current=rel))
             manifest[rel] = digest
             manifest_path.parent.mkdir(parents=True, exist_ok=True)
             manifest_path.write_text(json.dumps(manifest, indent=0, sort_keys=True))
 
-    if deletes:
-        with ftp() as f:
-            for rel in deletes:
-                f.delete(remote(f"{remote_dir}/{rel}"))
-                manifest.pop(rel, None)
+        for rel in deletes:
+            card.delete(rel)
+            manifest.pop(rel, None)
+        if deletes:
             print(f"  deleted {len(deletes)} files")
-            # Remove folders that became empty, deepest first (fails harmlessly if not).
+            # Remove folders that became empty, deepest first.
             dirs = {str(d) for rel in deletes for d in PurePosixPath(rel).parents if str(d) != "."}
             for d in sorted(dirs, key=lambda d: -d.count("/")):
-                try:
-                    f.rmd(remote(f"{remote_dir}/{d}"))
-                except ftplib.error_perm:
-                    pass
+                card.rmdir(d)
 
+    card.done()
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=0, sort_keys=True))
 
@@ -348,9 +447,14 @@ def main(argv):
     elif op == "boottime":
         boottime(*args[:1])
     elif op == "sync":
+        usb = None
+        if "--usb" in args:
+            i = args.index("--usb")
+            usb = args[i + 1]
+            args = args[:i] + args[i + 2:]
         flags = {a for a in args if a.startswith("--")}
         paths = [a for a in args if not a.startswith("--")]
-        sync(paths[0], paths[1], dry_run="--dry-run" in flags, prune="--prune" in flags)
+        sync(paths[0], paths[1], dry_run="--dry-run" in flags, prune="--prune" in flags, usb=usb)
     elif op == "ls":
         with ftp() as f:
             print("\n".join(listing(f, args[0])))

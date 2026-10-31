@@ -83,13 +83,23 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 
    The result is a VPK, `<root>/<TITLE_ID>/full/<TITLE_ID>.vpk`. No Vita is needed. Install it however you like; with VitaShell, the Vita needs free space for the VPK and the installed app.
 
-4. **Or upload straight to the Vita** (optional): `--deploy` uploads the app folder over Wi-Fi through vitacompanion (see "The Vita side") instead of writing a VPK. Later runs only upload what changed, which is much faster than reinstalling a VPK. Quit the game on the Vita first.
+4. **Or put it straight onto the Vita** (optional), instead of writing a VPK. Later runs only send what changed, which is much faster than reinstalling a VPK. Quit the game on the Vita first.
 
-   ```
-   uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml --deploy
-   ```
+   - **Over Wi-Fi:** `--deploy` uploads the app folder through [vitacompanion](https://github.com/devnoname120/vitacompanion), which must be running on the Vita. Write the Vita's IP address into `vita_host.txt` in the workspace, or set `VITA_HOST`. The Vita shows the address under Settings > Network > Wi-Fi Settings, in the connection's advanced settings.
 
-   After a run that wrote the VPK, `--stages deploy` uploads the same build without redoing anything. An uploaded folder isn't registered with the system, though: if the game isn't installed on the Vita yet, no bubble appears. Install the VPK the first time and deploy updates after that, or run VitaShell's "Refresh LiveArea" after the first deploy.
+     ```
+     uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml --deploy
+     ```
+
+   - **Over USB:** start VitaShell's USB mode (with the memory card as the USB device), mount the drive that appears on the computer, and pass its mount point with `--usb`. When it's done, eject the drive before leaving USB mode. USB is much faster than Wi-Fi for large games. In the container, the host's removable drives appear under `/media/host/` (`run-container.sh` shares `/run/media/$USER` or `/media/$USER`, or `VITA_MEDIA`).
+
+     ```
+     uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml --usb /media/host/VITA_CARD
+     ```
+
+   Both keep the same record of what's on the card, so you can switch between them. After a run that wrote the VPK, `--stages deploy` (with `--usb` for USB) sends the same build without redoing anything.
+
+   A folder copied this way isn't registered with the system, though: if the game isn't installed on the Vita yet, no bubble appears. Install the VPK the first time and send updates after that, or run VitaShell's "Refresh LiveArea" after the first copy.
 
 | Stage | Script | Does |
 |---|---|---|
@@ -110,7 +120,8 @@ The app folder ends up in `<root>/<TITLE_ID>/full/app/<TITLE_ID>`, next to the V
 | `--variant slice` | Builds only the folders in the settings file's `[slice]` section: a quick test build |
 | `--from STAGE` | Starts from a stage |
 | `--stages a,b` | Runs only these stages |
-| `--deploy` | Uploads the app to the Vita instead of writing a VPK |
+| `--deploy` | Uploads the app to the Vita over Wi-Fi instead of writing a VPK |
+| `--usb MOUNT` | Copies the app to the Vita's memory card mounted at `MOUNT` (VitaShell's USB mode) instead of writing a VPK |
 | `--vpk` / `--no-vpk` | Writes a VPK, or doesn't. The default is a VPK unless deploying. |
 | `--dry-run` | Prints the commands only |
 
@@ -172,7 +183,7 @@ The engine changes are on the `vita-perf` branches of this repository and its tw
   - boot timing
   - webcam frames through udcd_uvc
 
-  `VITA_HOST` sets the Vita's address and `VITA_TITLE_ID` the app.
+  The Vita's address comes from `VITA_HOST` or `vita_host.txt` in the workspace, and the app from `VITA_TITLE_ID` or `vita_title_id.txt`. Launching, quitting and file transfer need Wi-Fi; only copying a build also works over USB.
 - **Profiling and crashes:**
   - `vita_framebench.py` boots the game with Ren'Py's frame profiler and reports the slow frames per stage.
   - `vita_crash.py` reads a Vita core dump (`ux0:data/psp2core-*.psp2dmp`) and symbolizes each thread with the build's `eboot.elf`.
