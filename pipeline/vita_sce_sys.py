@@ -2,7 +2,8 @@
 # requires-python = ">=3.11"
 # dependencies = ["pillow"]
 # ///
-"""Generate a Vita app's sce_sys/: param.sfo, the bubble icon and LiveArea art.
+"""Generate a Vita app's sce_sys/: param.sfo, the bubble icon, LiveArea art and
+the package header (package/head.bin) the system needs to register the app.
 
 The title defaults to the game's config.name (from its .rpy files), the art
 to its presplash (presplash_background + presplash_foreground, or
@@ -15,9 +16,16 @@ The title ID must be 9 uppercase letters/digits and unique on the Vita; it is
 also the app's folder (ux0:app/TITLE_ID). Changing the title of an installed
 app only shows after the LiveArea database is refreshed (e.g. VitaShell's
 "Refresh LiveArea").
+
+head.bin is what VitaShell writes when it installs a VPK; having it in the
+build means an app folder copied onto the Vita can be registered as it is
+(`vitactl.py register`, or VitaShell's "Refresh LiveArea", which doesn't make
+one and so can't register a folder without it).
 """
 
 import argparse
+import base64
+import hashlib
 import re
 import shutil
 import struct
@@ -38,6 +46,27 @@ LIVEAREA_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
   </gate>
 </livearea>
 """
+
+# VitaShell's head.bin template (resources/head.bin, GPL-3.0, sha256 cbb88299...):
+# a homebrew package header, to which make_head_bin adds the content ID and
+# checksums exactly as VitaShell's makeHeadBin (package_installer.c) does.
+HEAD_BIN_TEMPLATE = base64.b64decode(
+    "f1BLRwAAAAEAAAKAAAAACwAAAZAAAAADAAAAAAABkAAAAAAAAAAKkAAAAAAAAAMQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAApomUOBny3QWHlLC2f8kwdtwvIvIlQMbflMu3ePiiVJWM5v10gQz3nUeyhmA8LgC7"
+    "ogdZUeeVpO2DUDW8ZWP+cIurDElznaPJH3RIInCT/OlAynSXuvHeHKpnt0F41xVof2V4dAAAAAEAAABAAAABgAAAAQAAAAQQ"
+    "AAAAAAAADeAAAAAAwAAAAgAABCAAAAAAAAAAAAAAAAAAAAAAAAAAAP////////////////////8KosshizcGLT4F+hFycoiF"
+    "yXsDmaBwnPjPnUEB1hef01d5Z/m2+FY9yvyhmOLHz9YuG9Ybvm/Bkr7gs8LlZVpF2Yi0l14WMT2iPhau1LfVNuOsgI8Y/q0a"
+    "hSDO7tpdt5VGNMxJUgn266UK5Xy1f69vTAaM5NhaA6+STpVbvODCrP8SlTGSrQboFyyx3Dakw5viPivsZVPrWIRJCQv0xrQC"
+    "cPNkWHUUAPhoiEZ+XLy+i1+s4OSm9Xfd2eWvBfBdriJ/tNEcf8w+mFW5adLSEFVFSzyVcLfD2/4jr80notOsjBEJv/ayAWIJ"
+    "wdr9p0epSPRGJgbydk3+bz8QsBwa3nOLFHM8ObbGG6FlmbgzrLgWtOal7AILW3Aj6yQa94zaVZbdSxyFg0kBsjm8MTvo8VpJ"
+    "zM8PhV9UeegxjVcbscKTh+LmVs+SUfxJlM21BBsER/e00mcxVPCtOtQljO3pmxL8Rxz8boEpizmru/A1AIeIhwAAAAEAAAAE"
+    "AAAAAgAAAAIAAAAEAAAAFQAAAAMAAAAEAAAADgAAAAQAAAAIAAAAAAABkAAAAAAFAAAABBlnAQAAAAAIAAAACAAAAAAAAAAA"
+    "AAAACQAAAAgAAAAAACQAAAAAAA0AAAAoAAAAAAAAALAakgcEYQydFFWOF3S2RNJck/PBWA+RIi/9tEKqZPyK0AAAAA8AAABI"
+    "AAAFkAAAAyAAAAAAAAAAAAAAAAABAQEBAAAAAAAAAAAAAAAAAAAAAL6aByYakdY1k81Z9BMjNAVbxPXDMfP58X7bf1MPGgp5"
+    "AAAAEAAAADgAAAowAAAAYMIAAAAAAAABAAAAAAAAAADDKqD3OkGEfLhmQ3vKzWheRKvZhclrrTOpvIjGdcUjngAAABEAAAAo"
+    "AXIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHr+9Xkwr3bgRvx13whOuEU9T8v0PZv6X2GZat6cLhqc"
+    "GRUQHXHmwFqEPSDorh4ccZTuvHNNLEa/PPNbMDrDGCD//////////////////////////////////////////w=="
+)
 
 # define config.name = _("My Game") / "My Game" / 'My Game'
 NAME_RE = re.compile(r"""^\s*define\s+config\.name\s*=\s*(?:_\(\s*)?(["'])(.*?)\1""", re.M)
@@ -102,6 +131,36 @@ def parse_sfo(blob):
         raw = blob[data_start + data_off:data_start + data_off + length]
         out[key] = struct.unpack("<I", raw)[0] if fmt == 0x0404 else raw.rstrip(b"\0").decode()
     return out
+
+
+def fpkg_hmac(data):
+    """The checksum VitaShell's fpkg_hmac puts in a homebrew package header."""
+    digest = hashlib.sha1(data).digest()
+    block = bytearray(64)
+    block[0:8] = block[8:16] = digest[4:12]
+    block[16:20] = digest[12:16]
+    block[20] = digest[16]
+    block[21:24] = digest[1:4]
+    block[24:32] = block[16:24]
+    return hashlib.sha1(block).digest()[:16]
+
+
+def make_head_bin(title_id, content_id=""):
+    """sce_sys/package/head.bin, byte for byte what VitaShell makes for the app."""
+    head = bytearray(HEAD_BIN_TEMPLATE)
+    content_id = (content_id or f"EP9000-{title_id}_00-0000000000000000").encode()[:48]
+    head[0x30:0x60] = content_id.ljust(48, b"\0")
+
+    def be32(offset):
+        return struct.unpack_from(">I", head, offset)[0]
+
+    end = be32(0xD0)                     # package header
+    head[end:end + 16] = fpkg_hmac(head[:end])
+    start, length, out = be32(0x08), be32(0x10), be32(0xD4)   # package info
+    head[out:out + 16] = fpkg_hmac(head[start:start + length - 64])
+    end = be32(0xE8)                     # everything
+    head[end:end + 16] = fpkg_hmac(head[:end])
+    return bytes(head)
 
 
 def cover(image, size):
@@ -170,6 +229,9 @@ def build_sce_sys(sce_sys, title, stitle, title_id, art):
     save_pal8(art, (840, 500), contents / "bg.png")
     save_pal8(art, (280, 158), contents / "startup.png")
     (contents / "template.xml").write_text(LIVEAREA_TEMPLATE, encoding="utf-8")
+
+    (sce_sys / "package").mkdir()
+    (sce_sys / "package" / "head.bin").write_bytes(make_head_bin(title_id, parsed["CONTENT_ID"]))
 
 
 def check_title_id(title_id):

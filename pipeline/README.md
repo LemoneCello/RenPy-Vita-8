@@ -103,7 +103,11 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 
    Both keep the same record of what's on the card, so you can switch between them. After a run that wrote the VPK, `--stages deploy` (with `--usb` for USB) sends the same build without redoing anything.
 
-   A folder copied this way isn't registered with the system, though: if the game isn't installed on the Vita yet, no bubble appears. Install the VPK the first time and send updates after that, or run VitaShell's "Refresh LiveArea" after the first copy.
+   A game copied onto the Vita this way also has to be registered with the system before its bubble appears, as installing a VPK would do. A Wi-Fi deploy does that by itself the first time; it takes a few seconds. After a first USB copy, leave USB mode and register it over Wi-Fi:
+
+   ```
+   uv run RenPy-Vita-8/pipeline/vitactl.py register TITLEID
+   ```
 
 5. **Removing a game from the Vita** (optional):
 
@@ -113,7 +117,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 
    It lists what it will delete and asks first. It removes the app folder and the system's leftovers for its title ID: LiveArea data, licence, system save folder and cache. With `--saves`, it also removes the game's Ren'Py saves in `ux0:/Ren'Py Data/`; deleting a game on the Vita itself leaves those behind. The save folder is found from the game's `config.save_directory`, so it needs an earlier build. It works over Wi-Fi, or with `--usb MOUNT` over USB.
 
-   The home-screen bubble can't be removed remotely: if the game was installed from a VPK, delete its bubble on the Vita afterwards (hold it, then Delete). `vitactl.py uninstall TITLEID [--saves NAME]` does the same for any title ID.
+   The home-screen bubble can't be removed remotely: if the game was installed or registered, delete its bubble on the Vita afterwards (hold it, then Delete). `vitactl.py uninstall TITLEID [--saves NAME]` does the same for any title ID.
 
 | Stage | Script | Does |
 |---|---|---|
@@ -122,7 +126,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 | `images` | `vita_images.py` | Halves images above 256×256 and crops large transparent margins. A generated hook loads them at the right size and pads them back. |
 | `fonts` | `vita_fonts.py` | Cuts fonts above 1 MB down to the characters the scripts use. |
 | `presplash` | `vita_presplash_build.py` | Prepares the loading screen. Images much smaller than the screen are enlarged with Real-ESRGAN (`vita_upscale.py`). |
-| `sce_sys` | `vita_sce_sys.py` | Writes `param.sfo` and the bubble icon and LiveArea art. |
+| `sce_sys` | `vita_sce_sys.py` | Writes `param.sfo`, the bubble icon and LiveArea art, and the package header (`package/head.bin`) the system needs to register the app. |
 | `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for the test game). |
 | `build` | `vita_build.py` | Assembles the app folder: port files, eboot, game, overlays and `rpy/` hooks. Packs assets into archives, because loose files are slow on the Vita. Writes the VPK. |
 | `deploy` | `vitactl.py sync` | Only with `--deploy`: uploads only what changed, to `ux0:app/TITLE_ID`. |
@@ -221,5 +225,6 @@ The pipeline (everything in `pipeline/`) is free software: you can redistribute 
 Exceptions:
 - **`patches/`:** each patch is under the licence of the project it modifies (SDL, SDL_image, HarfBuzz, FFmpeg, CPython).
 - **`port/renpy.py`:** based on Ren'Py's launcher, and keeps Ren'Py's MIT licence (see its header).
+- **The `head.bin` template in `vita_sce_sys.py`:** from [VitaShell](https://github.com/TheOfficialFloW/VitaShell) (GPL-3.0, which allows combining it with AGPL code).
 
 The rest of this repository (the port itself) is MIT-licensed, and the games you process keep their own terms.

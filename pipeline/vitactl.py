@@ -16,12 +16,15 @@
   uv run vitactl.py mv REMOTE NEW_REMOTE    rename a file
   uv run vitactl.py boottime [OUT_LOG]       launch, wait for Ren'Py's interface, print the
                                             boot stage times from log.txt
-  uv run vitactl.py sync LOCAL_DIR REMOTE_DIR [--dry-run] [--prune] [--usb MOUNT]
+  uv run vitactl.py sync LOCAL_DIR REMOTE_DIR [--dry-run] [--prune] [--usb MOUNT] [--register]
                                             upload new/changed files, e.g.
                                             sync build/app/ABCD00001 ux0:app/ABCD00001
                                             With --usb, copy them to the memory card
                                             mounted at MOUNT (VitaShell's USB mode)
-                                            instead of over Wi-Fi.
+                                            instead of over Wi-Fi. With --register,
+                                            register a new app afterwards (see below).
+  uv run vitactl.py register [TITLEID]      give an app copied into ux0:app its home-screen
+                                            bubble, as installing a VPK would
   uv run vitactl.py uninstall [TITLEID] [--saves SAVE_DIR] [--usb MOUNT] [--yes]
                                             remove a game (app folder and the system's
                                             leftovers; with --saves also its Ren'Py
@@ -425,7 +428,7 @@ def uninstall(title, saves=None, usb=None, yes=False):
     saves, Ren'Py's save folder (ux0:Ren'Py Data/<config.save_directory>),
     which deleting the app on the Vita leaves behind. Lists what it will
     delete and asks first unless yes. The home-screen bubble can't be removed
-    remotely: if the game was installed (VPK), delete the bubble on the Vita.
+    remotely: if the game was installed or registered, delete the bubble on the Vita.
     """
     if not re.fullmatch(r"[A-Z0-9]{9}", title):
         sys.exit(f"{title!r} isn't a title ID (9 capital letters or digits)")
@@ -466,7 +469,64 @@ def uninstall(title, saves=None, usb=None, yes=False):
     manifest = Path("build/deploy") / f"ux0_app_{title}.json"
     manifest.unlink(missing_ok=True)
     if any(t.startswith("appmeta/") for t, _ in found):
-        print("The game was installed: delete its bubble on the home screen too (hold it, then Delete).")
+        print("The game was registered: delete its bubble on the home screen too (hold it, then Delete).")
+
+
+def remote_names(f, path):
+    """Names in a remote folder (empty if it doesn't exist)."""
+    try:
+        return {parts[8] for parts in (line.split(None, 8) for line in listing(f, path)) if len(parts) == 9}
+    except ftplib.error_perm:
+        return set()
+
+
+def is_registered(card, title):
+    """Whether the system knows the app (installing or registering it makes ux0:appmeta/ID)."""
+    return card.tree(f"appmeta/{title}") is not None
+
+
+def register(title, timeout=120):
+    """
+    Registers an app folder copied into ux0:app/TITLE with the system, which
+    gives it its bubble, as installing a VPK does. The system's promoter only
+    takes a folder from elsewhere and moves it into ux0:app itself, so the
+    folder is renamed into ux0:temp and handed to vitacompanion's `promote`
+    (renames only: seconds, whatever the game's size). The folder needs
+    sce_sys/param.sfo (and sce_sys/package/head.bin, which vita_sce_sys.py
+    writes; vitacompanion makes one if it's missing).
+    """
+    if not re.fullmatch(r"[A-Z0-9]{9}", title):
+        sys.exit(f"{title!r} isn't a title ID (9 capital letters or digits)")
+    app, staging = f"app/{title}", f"temp/vitactl_register_{title}"
+
+    try:
+        cmd(f"quit {title}")
+    except OSError:
+        pass   # the Vita is unreachable: the FTP connection below says so
+    with FtpCard("ux0:") as card:
+        if is_registered(card, title):
+            print(f"{title} is already registered.")
+            return
+        if "param.sfo" not in remote_names(card.f, f"ux0:{app}/sce_sys"):
+            sys.exit(f"ux0:{app}/sce_sys/param.sfo is missing: deploy the app first")
+        if staging.split("/")[1] in remote_names(card.f, "ux0:temp"):
+            sys.exit(f"ux0:{staging} is left over from an earlier attempt: check it, move it back to\n"
+                     f"ux0:{app} or delete it, then try again")
+        card.makedirs("temp")
+        card.f.rename(remote(f"ux0:{app}"), remote(f"ux0:{staging}"))
+
+    reply = cmd(f"promote ux0:{staging}", timeout=timeout)
+    with FtpCard("ux0:") as card:
+        deadline = time.time() + timeout
+        while not (title in remote_names(card.f, "ux0:app") and is_registered(card, title)):
+            if not reply.startswith("Promoted") or time.time() > deadline:
+                if (staging.split("/")[1] in remote_names(card.f, "ux0:temp")
+                        and title not in remote_names(card.f, "ux0:app")):
+                    card.f.rename(remote(f"ux0:{staging}"), remote(f"ux0:{app}"))
+                sys.exit(f"Registering {title} failed: {reply or 'no reply'}\n"
+                         f"The app folder is back in ux0:{app}.")
+            time.sleep(2)
+    print(f"Registered {title}: its bubble is on the home screen.")
 
 
 def boottime(out=None, timeout=300, stop=None):
@@ -566,6 +626,17 @@ def main(argv):
         flags = {a for a in args if a.startswith("--")}
         paths = [a for a in args if not a.startswith("--")]
         sync(paths[0], paths[1], dry_run="--dry-run" in flags, prune="--prune" in flags, usb=usb)
+        if "--register" in flags and not "--dry-run" in flags:
+            title = PurePosixPath(paths[1].partition(":")[2]).name
+            if not paths[1].startswith("ux0:app/"):
+                sys.exit("--register works for ux0:app/TITLE_ID only")
+            if not usb:
+                register(title)
+            elif not is_registered(MountedCard(usb, "ux0:"), title):
+                print(f"{title} isn't registered yet, so it has no bubble. After leaving USB mode,\n"
+                      f"register it over Wi-Fi: vitactl.py register {title}")
+    elif op == "register":
+        register(args[0] if args else title_id())
     elif op == "ls":
         with ftp() as f:
             print("\n".join(listing(f, args[0])))

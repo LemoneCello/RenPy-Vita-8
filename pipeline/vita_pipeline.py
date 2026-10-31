@@ -116,7 +116,7 @@ def plan(cfg, variant, vpk, usb=None):
         "sce_sys": ["vita_sce_sys.py"] + sce_sys,
         "story": ["vita_story.py", "--renpy", game["renpy"], "--src", d["extract"], "--out", d["story"]],
         "build": ["vita_build.py"] + build_args,
-        "deploy": ["vitactl.py", "sync", d["app"] / title_id, f"ux0:app/{title_id}", "--prune"]
+        "deploy": ["vitactl.py", "sync", d["app"] / title_id, f"ux0:app/{title_id}", "--prune", "--register"]
                   + (["--usb", usb] if usb else []),
     }
 
