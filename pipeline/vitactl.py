@@ -20,8 +20,8 @@
                                             upload new/changed files, e.g.
                                             sync build/app/ABCD00001 ux0:app/ABCD00001
                                             With --usb, copy them to the memory card
-                                            mounted at MOUNT (VitaShell's USB mode)
-                                            instead of over Wi-Fi. With --register,
+                                            mounted at MOUNT (VitaShell's USB mode, or
+                                            a card reader) instead of over Wi-Fi. With --register,
                                             register a new app afterwards (see below).
   uv run vitactl.py register [TITLEID]      give an app copied into ux0:app its home-screen
                                             bubble, as installing a VPK would
@@ -279,8 +279,8 @@ class MountedCard:
             sys.exit(f"--usb works for ux0: only, not {remote_dir}")
         root = Path(mount)
         if not (root / "app").is_dir():
-            sys.exit(f"{mount} doesn't look like the Vita's memory card (no app/ folder): in VitaShell's\n"
-                     f"USB mode, mount the memory card (ux0:) on this computer and pass its mount point.")
+            sys.exit(f"{mount} doesn't look like the Vita's memory card (no app/ folder): mount the memory card\n"
+                     f"(ux0:) on this computer, through VitaShell's USB mode or a card reader, and pass its mount point.")
         self.dir = root / folder
 
     def __enter__(self):
@@ -342,7 +342,8 @@ class MountedCard:
     def done(self):
         # Write everything out before the card is unmounted.
         os.sync()
-        print("Done. Eject the memory card on this computer before leaving VitaShell's USB mode.")
+        print("Done. Eject the memory card on this computer before leaving VitaShell's USB mode"
+              " or putting the card back in the Vita.")
 
 
 def sync(local_dir, remote_dir, dry_run=False, prune=False, usb=None):
@@ -354,7 +355,7 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False, usb=None):
     only on the Vita (logs, saves, compiled scripts, backups) is never touched.
 
     Over Wi-Fi (vitacompanion's FTP) by default; with usb, the memory card is
-    mounted at that path on this computer (VitaShell's USB mode) and files are
+    mounted at that path on this computer (VitaShell's USB mode, or a card reader) and files are
     copied there. Both share the record of what's on the card.
     """
     local_dir = Path(local_dir)
@@ -633,8 +634,8 @@ def main(argv):
             if not usb:
                 register(title)
             elif not is_registered(MountedCard(usb, "ux0:"), title):
-                print(f"{title} isn't registered yet, so it has no bubble. After leaving USB mode, run\n"
-                      f"VitaShell's \"Refresh LiveArea\", or register it over Wi-Fi: vitactl.py register {title}")
+                print(f"{title} isn't registered yet, so it has no bubble. Once the card is back in use by the Vita,\n"
+                      f"run VitaShell's \"Refresh LiveArea\", or register it over Wi-Fi: vitactl.py register {title}")
     elif op == "register":
         register(args[0] if args else title_id())
     elif op == "ls":

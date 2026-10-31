@@ -6,7 +6,7 @@
 #
 #   --build       rebuild the image first
 #   --usb MOUNT   share the Vita's memory card, mounted on this computer at
-#                 MOUNT (VitaShell's USB mode), as /media/vita, for
+#                 MOUNT (VitaShell's USB mode or a card reader), as /media/vita, for
 #                 `vita_pipeline.py --usb /media/vita`; mount it first
 #   --dev         for working on the pipeline itself: the dev image (sudo,
 #                 Claude Code, desktop test runs), the host's network, and the

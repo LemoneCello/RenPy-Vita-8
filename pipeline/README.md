@@ -101,9 +101,11 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 
      When it's done, leave the container (or just finish the copy), eject the drive on the computer, and then leave USB mode.
 
-   Both keep the same record of what's on the card, so you can switch between them. After a run that wrote the VPK, `--stages deploy` (with `--usb` for USB) sends the same build without redoing anything.
+   - **With a card reader:** if the Vita uses a microSD card (an SD2Vita adapter), turn the Vita off, put the card in the computer's card reader, mount it, and pass its mount point with `--usb` as above. This is much faster than either. Eject the card before putting it back in the Vita.
 
-   A game copied onto the Vita this way also has to be registered with the system before its bubble appears, as installing a VPK would do. A Wi-Fi deploy does that by itself the first time; it takes a few seconds. After a first USB copy, leave USB mode and either:
+   All three keep the same record of what's on the card, so you can switch between them. After a run that wrote the VPK, `--stages deploy` (with `--usb` for USB or a card reader) sends the same build without redoing anything.
+
+   A game copied onto the Vita this way also has to be registered with the system before its bubble appears, as installing a VPK would do. A Wi-Fi deploy does that by itself the first time; it takes a few seconds. After a first copy over USB or with a card reader, once the card is back in use by the Vita, either:
    - run VitaShell's "Refresh LiveArea", which needs no network, or
    - register it over Wi-Fi: `uv run RenPy-Vita-8/pipeline/vitactl.py register TITLEID`.
 
@@ -113,7 +115,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
    uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml --uninstall [--saves]
    ```
 
-   It lists what it will delete and asks first. It removes the app folder and the system's leftovers for its title ID: LiveArea data, licence, system save folder and cache. With `--saves`, it also removes the game's Ren'Py saves in `ux0:/Ren'Py Data/`; deleting a game on the Vita itself leaves those behind. The save folder is found from the game's `config.save_directory`, so it needs an earlier build. It works over Wi-Fi, or with `--usb MOUNT` over USB.
+   It lists what it will delete and asks first. It removes the app folder and the system's leftovers for its title ID: LiveArea data, licence, system save folder and cache. With `--saves`, it also removes the game's Ren'Py saves in `ux0:/Ren'Py Data/`; deleting a game on the Vita itself leaves those behind. The save folder is found from the game's `config.save_directory`, so it needs an earlier build. It works over Wi-Fi, or with `--usb MOUNT` over USB or with a card reader.
 
    The home-screen bubble can't be removed remotely: if the game was installed or registered, delete its bubble on the Vita afterwards (hold it, then Delete). `vitactl.py uninstall TITLEID [--saves NAME]` does the same for any title ID.
 
@@ -127,7 +129,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 | `sce_sys` | `vita_sce_sys.py` | Writes `param.sfo`, the bubble icon and LiveArea art, and the package header (`package/head.bin`) the system needs to register the app. |
 | `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for the test game). |
 | `build` | `vita_build.py` | Assembles the app folder: port files, eboot, game, overlays and `rpy/` hooks. Packs assets into archives, because loose files are slow on the Vita. Writes the VPK. |
-| `deploy` | `vitactl.py sync` | Only with `--deploy` or `--usb`, or when named in `--stages`: sends only what changed to `ux0:app/TITLE_ID`, over Wi-Fi or USB, and registers a new game (over USB, it says how). |
+| `deploy` | `vitactl.py sync` | Only with `--deploy` or `--usb`, or when named in `--stages`: sends only what changed to `ux0:app/TITLE_ID`, over Wi-Fi, USB or a card reader, and registers a new game (over Wi-Fi; otherwise it says how). |
 
 The app folder ends up in `<root>/<TITLE_ID>/full/app/<TITLE_ID>`, next to the VPK. Reruns only redo what changed: extracting, movies and images skip files that haven't changed since the last run, and the VPK is only rewritten when the app's contents changed. The first full run for the test game takes about 20 minutes, mostly encoding its 449 movies. A rerun with nothing changed takes about 20 s. Its VPK is 3.0 GiB and takes about 10 s to write.
 
@@ -137,7 +139,7 @@ The app folder ends up in `<root>/<TITLE_ID>/full/app/<TITLE_ID>`, next to the V
 | `--from STAGE` | Starts from a stage |
 | `--stages a,b` | Runs only these stages |
 | `--deploy` | Uploads the app to the Vita over Wi-Fi instead of writing a VPK |
-| `--usb MOUNT` | Copies the app to the Vita's memory card mounted at `MOUNT` (VitaShell's USB mode) instead of writing a VPK |
+| `--usb MOUNT` | Copies the app to the Vita's memory card mounted at `MOUNT` (VitaShell's USB mode, or the microSD card in a card reader) instead of writing a VPK |
 | `--uninstall` | Removes the game from the Vita (asks first); `--saves` also removes its Ren'Py saves |
 | `--vpk` / `--no-vpk` | Writes a VPK, or doesn't. The default is a VPK unless deploying. |
 | `--dry-run` | Prints the commands only |

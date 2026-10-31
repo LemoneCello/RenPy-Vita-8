@@ -13,7 +13,7 @@ Without a Vita, the result is a VPK (.../TITLE_ID.vpk) to install however you
 like. With --deploy (or deploy named in --stages) the app folder is uploaded
 to the Vita over vitacompanion instead, and no VPK is written unless --vpk.
 With --usb MOUNT it's copied to the Vita's memory card mounted at MOUNT
-(VitaShell's USB mode) instead of over Wi-Fi.
+(VitaShell's USB mode, or a card reader) instead of over Wi-Fi.
 
 Stages, in order (each is its own script; see README.md):
 
@@ -136,7 +136,7 @@ def main():
     ap.add_argument("--from", dest="start", choices=STAGES, help="run from this stage on")
     ap.add_argument("--deploy", action="store_true", help="also upload the app to the Vita (Wi-Fi)")
     ap.add_argument("--usb", metavar="MOUNT",
-                    help="deploy by copying to the Vita's memory card mounted at MOUNT (VitaShell's USB mode)")
+                    help="deploy by copying to the Vita's memory card mounted at MOUNT (VitaShell's USB mode, or a card reader)")
     ap.add_argument("--vpk", action="store_true", default=None,
                     help="write a VPK (the default unless deploying)")
     ap.add_argument("--no-vpk", dest="vpk", action="store_false", help="don't write a VPK")
