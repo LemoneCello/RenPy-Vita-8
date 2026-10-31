@@ -205,6 +205,7 @@ The engine changes are on the `vita-perf` branches of this repository and its tw
 | `vita_mobile.rpy` | Lets game code see `renpy.mobile` as True, for touch layouts |
 | `vita_gl2.rpy` | Settings for the gl2 renderer |
 | `vita_pad.rpy` | Keeps the controller on (the Vita's buttons), for games that switch it off for PC players |
+| `vita_input_enter.rpy` | Games made before Ren'Py 8.3: Enter in a text input reaches the screen again (name-entry screens that accept the name on Enter) |
 | `py2/vita_py2compat.rpy` | Python 2 games only: `renpy.file()` returns text, as it did under Python 2 |
 
 ## The Vita side
