@@ -54,6 +54,7 @@ Settings file (TOML):
 
 import argparse
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -140,10 +141,16 @@ def main():
                     help="write a VPK (the default unless deploying)")
     ap.add_argument("--no-vpk", dest="vpk", action="store_false", help="don't write a VPK")
     ap.add_argument("--dry-run", action="store_true", help="only print the commands")
+    ap.add_argument("--uninstall", action="store_true",
+                    help="remove the game from the Vita instead of building (asks first); with --usb over USB")
+    ap.add_argument("--saves", action="store_true", help="with --uninstall, also remove its Ren'Py saves")
     args = ap.parse_args()
 
     with open(args.settings, "rb") as f:
         cfg = tomllib.load(f)
+
+    if args.uninstall:
+        sys.exit(uninstall(cfg, args))
 
     if args.stages:
         stages = [s.strip() for s in args.stages.split(",") if s.strip()]
@@ -200,6 +207,33 @@ def main():
     if times and "build" in [n for n, _ in times]:
         result = build[build.index("--vpk") + 1] if "--vpk" in build else os.path.join(build[build.index("--out") + 1], title_id)
         print(f"Result: {result}")
+
+
+# define config.save_directory = "..." in the game's scripts.
+SAVE_DIR_RE = re.compile(r"""^\s*define\s+config\.save_directory\s*=\s*(["'])(.+?)\1""", re.M)
+
+
+def uninstall(cfg, args):
+    """Runs vitactl.py uninstall for the game; returns its exit status."""
+    title_id = cfg["game"]["title_id"]
+    cmd = ["uv", "run", "-q", os.path.relpath(Path(__file__).resolve().parent / "vitactl.py"), "uninstall", title_id]
+    if args.saves:
+        # The save folder's name, from the extracted scripts (the PC release's
+        # archives hold them, so look there after a build).
+        extract = Path(cfg.get("build", {}).get("root", "build/games")) / title_id / args.variant / "extract/game"
+        names = {m.group(2) for path in sorted(extract.rglob("*.rpy"))
+                 for m in SAVE_DIR_RE.finditer(path.read_text(encoding="utf-8", errors="replace"))}
+        if len(names) != 1:
+            sys.exit(f"Couldn't find the game's config.save_directory in {extract} "
+                     f"({'none' if not names else 'several: ' + ', '.join(sorted(names))}); "
+                     f"pass it yourself: vitactl.py uninstall {title_id} --saves NAME")
+        cmd += ["--saves", names.pop()]
+    if args.usb:
+        cmd += ["--usb", args.usb]
+    print(shlex.join(cmd), flush=True)
+    if args.dry_run:
+        return 0
+    return subprocess.run(cmd).returncode
 
 
 def console():

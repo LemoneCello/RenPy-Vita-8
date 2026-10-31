@@ -105,6 +105,16 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 
    A folder copied this way isn't registered with the system, though: if the game isn't installed on the Vita yet, no bubble appears. Install the VPK the first time and send updates after that, or run VitaShell's "Refresh LiveArea" after the first copy.
 
+5. **Removing a game from the Vita** (optional):
+
+   ```
+   uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml --uninstall [--saves]
+   ```
+
+   It lists what it will delete and asks first. It removes the app folder and the system's leftovers for its title ID: LiveArea data, licence, system save folder and cache. With `--saves`, it also removes the game's Ren'Py saves in `ux0:/Ren'Py Data/`; deleting a game on the Vita itself leaves those behind. The save folder is found from the game's `config.save_directory`, so it needs an earlier build. It works over Wi-Fi, or with `--usb MOUNT` over USB.
+
+   The home-screen bubble can't be removed remotely: if the game was installed from a VPK, delete its bubble on the Vita afterwards (hold it, then Delete). `vitactl.py uninstall TITLEID [--saves NAME]` does the same for any title ID.
+
 | Stage | Script | Does |
 |---|---|---|
 | `extract` | `vita_extract.py` | Takes the files out of the game's archives. Movies go to a separate tree. |
@@ -126,6 +136,7 @@ The app folder ends up in `<root>/<TITLE_ID>/full/app/<TITLE_ID>`, next to the V
 | `--stages a,b` | Runs only these stages |
 | `--deploy` | Uploads the app to the Vita over Wi-Fi instead of writing a VPK |
 | `--usb MOUNT` | Copies the app to the Vita's memory card mounted at `MOUNT` (VitaShell's USB mode) instead of writing a VPK |
+| `--uninstall` | Removes the game from the Vita (asks first); `--saves` also removes its Ren'Py saves |
 | `--vpk` / `--no-vpk` | Writes a VPK, or doesn't. The default is a VPK unless deploying. |
 | `--dry-run` | Prints the commands only |
 

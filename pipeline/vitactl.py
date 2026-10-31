@@ -22,6 +22,10 @@
                                             With --usb, copy them to the memory card
                                             mounted at MOUNT (VitaShell's USB mode)
                                             instead of over Wi-Fi.
+  uv run vitactl.py uninstall [TITLEID] [--saves SAVE_DIR] [--usb MOUNT] [--yes]
+                                            remove a game (app folder and the system's
+                                            leftovers; with --saves also its Ren'Py
+                                            saves), after listing it and asking
 
 The Vita's address comes from VITA_HOST, else the first line of vita_host.txt
 in the workspace (the current directory). VITA_VIDEO sets the capture device.
@@ -31,6 +35,8 @@ import ftplib
 import hashlib
 import json
 import os
+import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -237,6 +243,26 @@ class FtpCard:
         except ftplib.error_perm:
             pass   # not empty
 
+    def tree(self, rel):
+        """(files, bytes) under rel, or None if it doesn't exist."""
+        try:
+            sizes = [size for _, size in walk_remote(self.f, f"{self.dir}/{rel}")]
+        except ftplib.error_perm:
+            return None
+        return len(sizes), sum(sizes)
+
+    def rmtree(self, rel):
+        path = f"{self.dir}/{rel}"
+        for line in listing(self.f, path):
+            parts = line.split(None, 8)
+            if len(parts) < 9 or parts[8] in (".", ".."):
+                continue
+            if line.startswith("d"):
+                self.rmtree(f"{rel}/{parts[8]}")
+            else:
+                self.f.delete(remote(f"{path}/{parts[8]}"))
+        self.f.rmd(remote(path))
+
     def done(self):
         pass
 
@@ -300,10 +326,20 @@ class MountedCard:
         except OSError:
             pass   # not empty
 
+    def tree(self, rel):
+        path = self.dir / rel
+        if not path.is_dir():
+            return None
+        sizes = [p.stat().st_size for p in path.rglob("*") if p.is_file()]
+        return len(sizes), sum(sizes)
+
+    def rmtree(self, rel):
+        shutil.rmtree(self.dir / rel)
+
     def done(self):
         # Write everything out before the card is unmounted.
         os.sync()
-        print("Copied. Unmount (eject) the memory card on this computer before leaving VitaShell's USB mode.")
+        print("Done. Eject the memory card on this computer before leaving VitaShell's USB mode.")
 
 
 def sync(local_dir, remote_dir, dry_run=False, prune=False, usb=None):
@@ -380,6 +416,57 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False, usb=None):
     card.done()
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=0, sort_keys=True))
+
+
+def uninstall(title, saves=None, usb=None, yes=False):
+    """
+    Removes a game from the Vita: its app folder, the system's leftovers for
+    its title ID (LiveArea data, licence, system save folder, cache) and, with
+    saves, Ren'Py's save folder (ux0:Ren'Py Data/<config.save_directory>),
+    which deleting the app on the Vita leaves behind. Lists what it will
+    delete and asks first unless yes. The home-screen bubble can't be removed
+    remotely: if the game was installed (VPK), delete the bubble on the Vita.
+    """
+    if not re.fullmatch(r"[A-Z0-9]{9}", title):
+        sys.exit(f"{title!r} isn't a title ID (9 capital letters or digits)")
+    targets = [f"app/{title}", f"appmeta/{title}", f"license/app/{title}", f"user/00/savedata/{title}",
+               f"cache/{title}"]
+    if saves:
+        if "/" in saves or saves in ("", ".", ".."):
+            sys.exit(f"{saves!r} isn't a save folder name")
+        targets.append(f"Ren'Py Data/{saves}")
+
+    if not usb:
+        try:
+            cmd(f"quit {title}")
+        except OSError:
+            pass   # the Vita is unreachable: the FTP connection below says so
+
+    card = MountedCard(usb, "ux0:") if usb else FtpCard("ux0:")
+    with card:
+        found = [(t, card.tree(t)) for t in targets]
+        found = [(t, n) for t, n in found if n is not None]
+        if not found:
+            print(f"Nothing of {title} is on the Vita.")
+            return
+        print(f"To delete from the Vita ({'memory card at ' + usb if usb else 'over Wi-Fi'}):")
+        for t, (files, size) in found:
+            print(f"  ux0:{t}  ({files} files, {size / 2**20:.1f} MiB)")
+        if not yes:
+            if not sys.stdin.isatty():
+                sys.exit("Not deleting: run in a terminal to confirm, or pass --yes.")
+            if input("Delete these? [y/N] ").strip().lower() not in ("y", "yes"):
+                print("Nothing deleted.")
+                return
+        for t, _ in found:
+            card.rmtree(t)
+            print(f"  deleted ux0:{t}")
+
+    card.done()
+    manifest = Path("build/deploy") / f"ux0_app_{title}.json"
+    manifest.unlink(missing_ok=True)
+    if any(t.startswith("appmeta/") for t, _ in found):
+        print("The game was installed: delete its bubble on the home screen too (hold it, then Delete).")
 
 
 def boottime(out=None, timeout=300, stop=None):
@@ -460,6 +547,16 @@ def main(argv):
         print(f"renamed {args[0]} -> {args[1]}")
     elif op == "boottime":
         boottime(*args[:1])
+    elif op == "uninstall":
+        usb = saves = None
+        for opt in ("--usb", "--saves"):
+            if opt in args:
+                i = args.index(opt)
+                value = args[i + 1]
+                args = args[:i] + args[i + 2:]
+                usb, saves = (value, saves) if opt == "--usb" else (usb, value)
+        rest = [a for a in args if not a.startswith("--")]
+        uninstall(rest[0] if rest else title_id(), saves=saves, usb=usb, yes="--yes" in args)
     elif op == "sync":
         usb = None
         if "--usb" in args:
