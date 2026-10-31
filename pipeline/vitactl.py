@@ -268,13 +268,27 @@ class MountedCard:
     def makedirs(self, rel_dir):
         (self.dir / rel_dir).mkdir(parents=True, exist_ok=True)
 
+    # Bytes written between forcing data out to the card: desktops often mount
+    # removable drives with write caching, so without this the copy "finishes"
+    # at memory speed and the real writing happens, unshown, in the final sync.
+    FLUSH_EVERY = 32 << 20
+
     def put(self, rel, path, progress_callback):
         dest = self.dir / rel
         tmp = dest.with_name(dest.name + ".part")
+        pending = 0
         with open(path, "rb") as src, open(tmp, "wb") as out:
             while block := src.read(1 << 20):
                 out.write(block)
-                progress_callback(len(block))
+                pending += len(block)
+                if pending >= self.FLUSH_EVERY:
+                    out.flush()
+                    os.fsync(out.fileno())
+                    progress_callback(pending)
+                    pending = 0
+            out.flush()
+            os.fsync(out.fileno())
+            progress_callback(pending)
         tmp.replace(dest)
 
     def delete(self, rel):
