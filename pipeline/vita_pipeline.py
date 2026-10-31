@@ -19,7 +19,7 @@ Stages, in order (each is its own script; see README.md):
 
   extract    vita_extract.py      files from the game's archives
   video      vita_video.py        H.264/AAC re-encodes (incremental)
-  images     vita_images.py       half-size images + oversample hook
+  images     vita_images.py       images shrunk to the Vita's screen + oversample hook
   fonts      vita_fonts.py        subsets of big fonts
   presplash  vita_presplash_build.py  loading-screen images
   sce_sys    vita_sce_sys.py      param.sfo, icon, LiveArea

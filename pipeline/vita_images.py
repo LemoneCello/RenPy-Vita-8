@@ -7,7 +7,15 @@
 Reads an extracted game/ tree and writes an overlay directory holding only the
 downscaled images (same paths and filenames) plus vita_oversample.rpy. That
 script hooks Ren'Py's Image so every listed file gets oversample=1/<factor>, so
-layout written for 1920x1080 stays the same without editing the game's scripts.
+the game's layout stays the same without editing its scripts.
+
+The factor makes the game's screen fit the Vita's (960x544), the way Ren'Py
+scales it there: the game's size (gui.init(W, H) or config.screen_width and
+screen_height in its scripts) divided by the Vita's, for the side that limits.
+1920x1080 games: 2 (full-screen images become 960x540); 1280x720: 4/3; games
+already that small or smaller: nothing to shrink (only the cropping below).
+Every large image shrinks by the same factor, so each keeps its size relative
+to the screen. --factor overrides it.
 
 Small images are left alone: they save little memory, and many are Frame()
 sources whose pixel borders would need changing too.
@@ -24,9 +32,11 @@ zero after premultiplying anyway.
 import argparse
 import json
 import math
+import re
 import shutil
 import sys
 from concurrent.futures import ProcessPoolExecutor
+from fractions import Fraction
 from pathlib import Path, PurePosixPath
 
 from PIL import Image
@@ -34,6 +44,11 @@ from PIL import Image
 from vita_common import progress
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+VITA_SCREEN = (960, 544)
+
+# gui.init(1920, 1080), or config.screen_width = 1920 (define'd or assigned).
+GUI_INIT_RE = re.compile(r"^\s*gui\.init\(\s*(\d+)\s*,\s*(\d+)\s*\)", re.M)
+SCREEN_SIZE_RE = re.compile(r"^\s*(?:define\s+)?config\.screen_(width|height)\s*=\s*(\d+)\s*$", re.M)
 HOOK_NAME = "vita_oversample.rpy"
 
 HOOK_TEMPLATE = '''\
@@ -155,6 +170,36 @@ def find_images(src, prefixes):
         yield rel
 
 
+def game_size(game_dir):
+    """The game's screen size from its scripts, or None if they don't say."""
+    found = {}
+    for path in sorted(game_dir.rglob("*.rpy")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if m := GUI_INIT_RE.search(text):
+            return int(m.group(1)), int(m.group(2))
+        for key, value in SCREEN_SIZE_RE.findall(text):
+            found.setdefault(key, int(value))
+    if "width" in found and "height" in found:
+        return found["width"], found["height"]
+    return None
+
+
+def auto_factor(size):
+    """How much to shrink images so the game's screen fits the Vita's; at least 1."""
+    w, h = size
+    return max(Fraction(w, VITA_SCREEN[0]), Fraction(h, VITA_SCREEN[1]), Fraction(1))
+
+
+def parse_factor(text):
+    try:
+        factor = Fraction(text)
+    except (ValueError, ZeroDivisionError):
+        raise argparse.ArgumentTypeError(f"{text!r} isn't a number or fraction like 4/3")
+    if factor < 1:
+        raise argparse.ArgumentTypeError("the factor must be at least 1")
+    return factor
+
+
 def process(job):
     """Downscale one image. Returns (rel, status, old_size, new_size, trim)."""
     src, dest, rel, factor, min_pixels, jpeg_quality, trim_below = job
@@ -164,9 +209,15 @@ def process(job):
         if w * h < min_pixels:
             return rel, "small", (w, h), None, None
 
-        new_size = (math.ceil(w / factor), math.ceil(h / factor))
+        new_size = (math.ceil(Fraction(w) / factor), math.ceil(Fraction(h) / factor))
         fmt = img.format
-        if img.mode in ("RGBA", "LA", "P", "PA") and fmt != "JPEG":
+        has_alpha = img.mode in ("RGBA", "LA", "P", "PA") and fmt != "JPEG"
+        if new_size == (w, h):
+            # Nothing to shrink (factor 1): only cropping can help, and only with alpha.
+            if not has_alpha:
+                return rel, "small", (w, h), None, None
+            out = img.convert("RGBA")
+        elif has_alpha:
             # Resize premultiplied so transparent edges don't pick up dark fringes.
             out = img.convert("RGBA").convert("RGBa").resize(new_size, Image.LANCZOS).convert("RGBA")
         else:
@@ -180,6 +231,8 @@ def process(job):
         if (right - left) * (bottom - top) < trim_below * new_size[0] * new_size[1]:
             out = out.crop(bbox)
             trim = (left, top, new_size[0], new_size[1])
+    if new_size == (w, h) and trim is None:
+        return rel, "small", (w, h), None, None
 
     target = dest / rel
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -195,7 +248,7 @@ def process(job):
 def write_hook(dest, scaled, factor, trims):
     # Ren'Py's oversample is file pixels per virtual pixel, so a file shrunk by
     # `factor` needs 1/factor to be drawn at its original size.
-    entries = "\n".join(f'            "{str(rel).lower()}": {1 / factor!r},' for rel in sorted(scaled))
+    entries = "\n".join(f'            "{str(rel).lower()}": {float(1 / factor)!r},' for rel in sorted(scaled))
     trim_entries = "\n".join(f'            "{str(rel).lower()}": {trims[rel]!r},' for rel in sorted(trims))
     text = HOOK_TEMPLATE.format(entries=entries, trims=trim_entries)
     hook = dest / HOOK_NAME
@@ -214,7 +267,8 @@ def main():
     parser.add_argument("--dest", type=Path, default=Path("build/images/game"), help="overlay output directory")
     parser.add_argument("--only", action="append", default=[], metavar="PREFIX",
                         help="only process paths starting with PREFIX (repeatable), e.g. gui/")
-    parser.add_argument("--factor", type=int, default=2, help="downscale factor (default 2)")
+    parser.add_argument("--factor", type=parse_factor,
+                        help="downscale factor, e.g. 2 or 4/3 (default: from the game's screen size)")
     parser.add_argument("--min-pixels", type=int, default=256 * 256,
                         help="leave images with fewer pixels than this untouched")
     parser.add_argument("--jpeg-quality", type=int, default=90)
@@ -233,11 +287,21 @@ def main():
             print(f"  {rel}")
         return
 
+    if args.factor is None:
+        size = game_size(args.src)
+        if size is None:
+            sys.exit("The game's scripts don't give its screen size (gui.init(W, H) or config.screen_width\n"
+                     "and screen_height); pass --factor, e.g. --factor 1 to leave image sizes alone")
+        args.factor = auto_factor(size)
+        exact = "" if args.factor.denominator == 1 else f" ({float(args.factor):.3g})"
+        print(f"Game screen {size[0]}x{size[1]}: shrinking images by {args.factor}{exact}"
+              if args.factor > 1 else f"Game screen {size[0]}x{size[1]} fits the Vita's: only cropping")
+
     # Incremental, like the extract and video stages: a record next to the
     # overlay (not in it, so it isn't shipped) keeps each image's source size
     # and modification time and its result. Images that haven't changed since
     # are kept; different settings start over.
-    settings = {"factor": args.factor, "min_pixels": args.min_pixels, "jpeg_quality": args.jpeg_quality,
+    settings = {"factor": str(args.factor) if args.factor.denominator != 1 else int(args.factor), "min_pixels": args.min_pixels, "jpeg_quality": args.jpeg_quality,
                 "trim_below": args.trim_below}
     record_path = args.dest.parent / f"{args.dest.name}.images.json"
     try:
@@ -292,13 +356,14 @@ def main():
         scaled.append(rel)
         if e["trim"] is not None:
             trims[rel] = tuple(e["trim"])
-        odd += bool(w % args.factor or h % args.factor)
+        odd += (Fraction(w) / args.factor).denominator != 1 or (Fraction(h) / args.factor).denominator != 1
         before += w * h * 4
         after += new[0] * new[1] * 4
 
     write_hook(args.dest, scaled, args.factor, trims)
 
-    print(f"Scaled {len(scaled)}, left {small} small images untouched; cropped {len(trims)} mostly transparent ones")
+    changed = f"Scaled {len(scaled)}" if args.factor > 1 else f"Changed {len(scaled)}"
+    print(f"{changed}, left {small} untouched; cropped {len(trims)} mostly transparent ones")
     if odd:
         print(f"  {odd} had dimensions not divisible by {args.factor}; they now display up to 1 px larger")
     print(f"Decoded texture size of scaled images: {mib(before)} -> {mib(after)}")
