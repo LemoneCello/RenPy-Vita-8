@@ -30,7 +30,10 @@ the boot part: they run at init either way, and as story flow they do nothing
 output (the original .rpyc is used).
 
 The splitting runs under the game's own desktop Ren'Py Python (it needs
-Ren'Py's classes), which this script starts itself.
+Ren'Py's classes), which this script starts itself. It needs Ren'Py 8
+(Python 3): for an older game, --renpy can name any Ren'Py 8 desktop build
+(Ren'Py 8 reads older compiled scripts); with only an older Ren'Py, the split
+is skipped and the game's scripts load at startup as usual.
 
   uv run vita_story.py --renpy MyGame-1.0-pc [--src build/extract/game] [--out build/story/game]
 """
@@ -44,6 +47,8 @@ import subprocess
 import sys
 import zlib
 from pathlib import Path
+
+from vita_common import script_texts
 
 INDEX_NAME = "vita_story_index.bin"
 STORY_DIR = "vita_story"
@@ -169,8 +174,7 @@ def find_cds_with_init(game_dir):
     """Names of statements the game registers with an execute_init function."""
     names = set()
     pattern = re.compile(r"register_statement\s*\(\s*['\"]([^'\"]+)['\"](.*?)\)\s*$", re.S | re.M)
-    for rpy in Path(game_dir).rglob("*.rpy"):
-        text = rpy.read_text(encoding="utf-8", errors="replace")
+    for _path, text in script_texts(Path(game_dir)):
         for m in pattern.finditer(text):
             if "execute_init" in m.group(2):
                 names.add(m.group(1))
@@ -191,12 +195,17 @@ def main(argv):
     args = ap.parse_args(argv)
 
     pythons = sorted(args.renpy.glob("lib/py3-*/python"))
-    if not pythons:
-        sys.exit(f"no Ren'Py Python under {args.renpy}/lib")
 
     if args.out.exists():
         shutil.rmtree(args.out)
     args.out.mkdir(parents=True)
+
+    if not pythons:
+        if not (args.renpy / "renpy").is_dir():
+            sys.exit(f"{args.renpy} isn't a Ren'Py desktop build (no renpy/ folder)")
+        print(f"{args.renpy} has no Ren'Py 8 (Python 3) to split the scripts with: skipping the split, "
+              "so the scripts load at startup. Set story_renpy to a Ren'Py 8 desktop build to split them.")
+        return 0
 
     cds = find_cds_with_init(args.src)
     if cds:

@@ -34,6 +34,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from vita_common import script_texts
+
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp")
 
 LIVEAREA_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
@@ -207,8 +209,8 @@ def game_art(game_dir):
 
 
 def game_name(game_dir):
-    for path in sorted(game_dir.rglob("*.rpy")):
-        m = NAME_RE.search(path.read_text(encoding="utf-8", errors="replace"))
+    for _path, text in script_texts(game_dir):
+        m = NAME_RE.search(text)
         if m:
             return m.group(2)
     return None

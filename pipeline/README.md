@@ -69,6 +69,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
    # art_start = "start.png"         #   the picture on its start button, 280×158
    dir = "MyGame-1.0-pc/game"        # the PC release's game/ folder
    renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs the story stage)
+   # story_renpy = "OtherGame-pc"    # for a game made with Ren'Py 7 or older: a Ren'Py 8 desktop build for the story stage
 
    [build]
    # port_build = "build/port/vita"  # the eboot, see "Building the eboot"
@@ -131,7 +132,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 | `fonts` | `vita_fonts.py` | Cuts fonts above 1 MB down to the characters the scripts use. |
 | `presplash` | `vita_presplash_build.py` | Prepares the loading screen. Images much smaller than the screen are enlarged with Real-ESRGAN (`vita_upscale.py`). |
 | `sce_sys` | `vita_sce_sys.py` | Writes `param.sfo`, the bubble icon and LiveArea art, and the package header (`package/head.bin`) the system needs to register the app. The art is the game's loading screen (its `presplash` images), else its main menu art, unless the settings file names other pictures: `art` for all three places, or `art_icon` (the bubble, 128×128), `art_background` (the LiveArea, 840×500) and `art_start` (the picture on the LiveArea's start button, 280×158) for one each. Pictures are scaled and centre-cropped to those sizes, so one with the same shape works best. |
-| `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for the test game). |
+| `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for the test game). It runs under the game's desktop Ren'Py, which must be Ren'Py 8; for an older game, `story_renpy` can name any Ren'Py 8 desktop build, and without one the split is skipped. |
 | `build` | `vita_build.py` | Assembles the app folder: port files, eboot, game, overlays and `rpy/` hooks. Packs assets into archives, because loose files are slow on the Vita. Writes the VPK. |
 | `deploy` | `vitactl.py sync` | Only with `--deploy` or `--usb`, or when named in `--stages`: sends only what changed to `ux0:app/TITLE_ID`, over Wi-Fi, USB or a card reader, and registers a new game (over Wi-Fi; otherwise it says how). |
 
@@ -215,7 +216,7 @@ The engine changes are on the `vita-perf` branches of this repository and its tw
 
 ## Game-specific notes
 
-The pipeline reads everything from the game's own files and Ren'Py's rules, without hard-coded names. A few things are still worth checking per game:
+The pipeline reads everything from the game's own files and Ren'Py's rules, without hard-coded names. Games that ship only compiled scripts (`.rpyc`, no `.rpy`) work too: the stages that look through the scripts read a rendering of the compiled files instead (`vita_common.rpyc_text`), made without running any of the game's code. A few things are still worth checking per game:
 - Fonts used for text that isn't in any script (typed names, generated text) would lose characters when subset. Keep them with `[stages.fonts] args = ["--keep", "FONT.ttf"]`.
 - Some games switch effects or layouts off for mobile variants. The port reports the Vita as `vita small phone touch mobile`.
 - `--variant slice` needs a `[slice]` section listing the folders to include.

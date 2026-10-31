@@ -70,7 +70,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from vita_common import progress
+from vita_common import progress, script_texts
 
 VIDEO_EXTS = {".webm", ".mp4", ".ogv", ".mkv", ".avi", ".mpg", ".mpeg", ".m4v"}
 
@@ -118,8 +118,7 @@ def movie_calls(text):
 def looping_only(scripts_dir, names):
     """The video names (paths relative to game/) the scripts mention only as
     the play= of looping Movie images (see the module docstring)."""
-    texts = [p.read_text(encoding="utf-8", errors="replace")
-             for p in sorted(scripts_dir.rglob("*")) if p.suffix in (".rpy", ".rpym")]
+    texts = [text for _path, text in script_texts(scripts_dir)]
     stems = {}
     for n in names:
         stems.setdefault(Path(n).stem.lower(), []).append(n)
@@ -221,7 +220,7 @@ def main(argv):
     ap.add_argument("--preset", default="veryslow", help="x264 preset (default veryslow)")
     ap.add_argument("--crf", type=float, default=18.0, help="x264 quality, lower is better (default 18)")
     ap.add_argument("--profile", default="high", help="H.264 profile (default high)")
-    ap.add_argument("--scripts", type=Path, help="game folder with the .rpy files, to find looping movies")
+    ap.add_argument("--scripts", type=Path, help="game folder with the scripts, to find looping movies")
     ap.add_argument("--loop-min-seconds", type=float, default=0.0,
                     help="repeat looping movies shorter than this inside the file (default 0: off)")
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))

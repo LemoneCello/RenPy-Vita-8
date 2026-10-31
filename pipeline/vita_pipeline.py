@@ -39,6 +39,8 @@ Settings file (TOML):
   title = "..."            # optional, default: the game's config.name
   dir = "path/game"        # the PC release's game/ directory
   renpy = "path"           # the PC release's base directory (for vita_story)
+  story_renpy = "path"     # optional: another Ren'Py 8 desktop build for vita_story,
+                           # for games made with Ren'Py 7 or older (Python 2)
 
   [build]
   port_build = "build/port/vita"  # optional; vita_port_build.py's default output
@@ -61,6 +63,8 @@ import sys
 import time
 import tomllib
 from pathlib import Path
+
+from vita_common import script_texts
 
 STAGES = ["extract", "video", "images", "fonts", "presplash", "sce_sys", "story", "build", "deploy"]
 
@@ -117,7 +121,8 @@ def plan(cfg, variant, vpk, usb=None):
         "fonts": ["vita_fonts.py", "--src", d["extract"], "--dest", d["fonts"]],
         "presplash": ["vita_presplash_build.py", d["extract"], d["presplash"]],
         "sce_sys": ["vita_sce_sys.py"] + sce_sys,
-        "story": ["vita_story.py", "--renpy", game["renpy"], "--src", d["extract"], "--out", d["story"]],
+        "story": ["vita_story.py", "--renpy", game.get("story_renpy", game["renpy"]),
+                  "--src", d["extract"], "--out", d["story"]],
         "build": ["vita_build.py"] + build_args,
         "deploy": ["vitactl.py", "sync", d["app"] / title_id, f"ux0:app/{title_id}", "--prune", "--register"]
                   + (["--usb", usb] if usb else []),
@@ -224,8 +229,7 @@ def uninstall(cfg, args):
         # The save folder's name, from the extracted scripts (the PC release's
         # archives hold them, so look there after a build).
         extract = Path(cfg.get("build", {}).get("root", "build/games")) / title_id / args.variant / "extract/game"
-        names = {m.group(2) for path in sorted(extract.rglob("*.rpy"))
-                 for m in SAVE_DIR_RE.finditer(path.read_text(encoding="utf-8", errors="replace"))}
+        names = {m.group(2) for _path, text in script_texts(extract) for m in SAVE_DIR_RE.finditer(text)}
         if len(names) != 1:
             sys.exit(f"Couldn't find the game's config.save_directory in {extract} "
                      f"({'none' if not names else 'several: ' + ', '.join(sorted(names))}); "

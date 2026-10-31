@@ -41,7 +41,7 @@ import sys
 from collections import Counter
 from pathlib import Path, PurePosixPath
 
-from vita_common import extract_entry, progress, read_rpa_index
+from vita_common import extract_entry, progress, read_rpa_index, rpyc_text
 
 VIDEO_EXTS = {".webm", ".mp4", ".ogv", ".mkv", ".avi", ".mpg", ".mpeg", ".m4v"}
 SCRIPT_EXTS = {".rpy", ".rpyc", ".rpym", ".rpymc"}
@@ -85,14 +85,34 @@ def read_archives(archives):
 
 
 def script_text(index, game_dir, name):
-    """Source of a .rpy, from the game dir or the archive."""
+    """Text of a script, from the game dir or the archive: a .rpy's source, or
+    for a .rpyc, a rendering of it (vita_common.rpyc_text)."""
     loose = game_dir / name
     if loose.exists():
-        return loose.read_text(encoding="utf-8", errors="replace")
-    archive, off, length, prefix = index[name]
-    with open(archive, "rb") as a:
-        a.seek(off)
-        return (prefix + a.read(length)).decode("utf-8", errors="replace")
+        data = loose.read_bytes()
+    else:
+        archive, off, length, prefix = index[name]
+        with open(archive, "rb") as a:
+            a.seek(off)
+            data = prefix + a.read(length)
+    if name.endswith((".rpyc", ".rpymc")):
+        return rpyc_text(data)
+    return data.decode("utf-8", errors="replace")
+
+
+def script_names(index):
+    """The game's scripts: each .rpy/.rpym, or its compiled file when the
+    game ships no source."""
+    names = set(index)
+    return sorted(n for n in index if n.endswith((".rpy", ".rpym"))
+                  or (n.endswith((".rpyc", ".rpymc")) and n[:-1] not in names))
+
+
+def script_name(index, game_dir, name):
+    """NAME, or its compiled file when the game ships no source for it."""
+    if name in index or (game_dir / name).exists() or not name.endswith((".rpy", ".rpym")):
+        return name
+    return name + "c"
 
 
 def references(texts, index, all_texts):
@@ -203,15 +223,14 @@ def main(argv):
         reasons[f"include {prefix}"] += len(add - selected)
         selected |= add
 
-    rpys = [n for n in index if n.endswith(".rpy")]
-    all_texts = [script_text(index, args.game, n) for n in rpys]
+    all_texts = [script_text(index, args.game, n) for n in script_names(index)]
 
     add = audio_namespace(all_texts, index)
     reasons["audio namespace"] += len(add - selected)
     selected |= add
 
     if args.referenced_by:
-        texts = [script_text(index, args.game, n) for n in args.referenced_by]
+        texts = [script_text(index, args.game, script_name(index, args.game, n)) for n in args.referenced_by]
         add = references(texts, index, all_texts)
         reasons["referenced"] += len(add - selected)
         selected |= add

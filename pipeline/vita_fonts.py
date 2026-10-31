@@ -8,8 +8,9 @@ Games sometimes ship a large font (CJK, a few MB) for a handful of lines.
 Ren'Py on the Vita reads a font file into memory when it first uses it
 (rpy/vita_font_memory.rpy), and every file costs space on the card. This
 writes a copy of each font above --min-mb that keeps only the characters
-appearing anywhere in the game's .rpy/.rpym files (dialogue, screens,
-translations), plus printable Latin-1 and general punctuation. Layout
+appearing anywhere in the game's scripts (dialogue, screens, translations;
+compiled scripts with no source are read too), plus printable Latin-1 and
+general punctuation. Layout
 features, kerning and hinting are kept, so the text looks the same.
 
 Text that never appears in a script can lose glyphs in a subset font: names
@@ -17,21 +18,18 @@ the player types, or strings built at runtime from data files. That only
 matters for a big font used for such text (a CJK game's dialogue font with a
 name input, say); check the list this prints. --keep FILE leaves a font out.
 
-Refuses to run if a compiled script has no source next to it (its strings
-would be missed), unless --force.
-
   uv run vita_fonts.py --src build/extract/game --dest build/fonts/game
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 from fontTools import subset
 from fontTools.ttLib import TTFont
 
+from vita_common import script_texts
+
 FONT_EXTS = {".ttf", ".otf"}
-SCRIPT_EXTS = {".rpy", ".rpym"}
 
 # Printable ASCII and Latin-1, general punctuation (quotes, dashes, ellipsis).
 BASE_CHARS = set(range(0x20, 0x7F)) | set(range(0xA0, 0x100)) | set(range(0x2000, 0x2070))
@@ -39,21 +37,9 @@ BASE_CHARS = set(range(0x20, 0x7F)) | set(range(0xA0, 0x100)) | set(range(0x2000
 
 def script_chars(src):
     chars = set()
-    for path in src.rglob("*"):
-        if path.is_file() and path.suffix.lower() in SCRIPT_EXTS:
-            chars.update(ord(c) for c in path.read_text(encoding="utf-8", errors="replace"))
+    for _path, text in script_texts(src):
+        chars.update(ord(c) for c in text)
     return chars
-
-
-def compiled_without_source(src):
-    rv = []
-    for path in src.rglob("*.rpyc"):
-        if not path.with_suffix(".rpy").exists():
-            rv.append(path.relative_to(src))
-    for path in src.rglob("*.rpymc"):
-        if not path.with_suffix(".rpym").exists():
-            rv.append(path.relative_to(src))
-    return rv
 
 
 def main():
@@ -62,12 +48,7 @@ def main():
     ap.add_argument("--dest", type=Path, default=Path("build/fonts/game"), help="overlay output directory")
     ap.add_argument("--min-mb", type=float, default=1.0, help="subset fonts larger than this (default 1 MB)")
     ap.add_argument("--keep", action="append", default=[], metavar="FILE", help="leave this font (path under game/) whole")
-    ap.add_argument("--force", action="store_true", help="run even if some compiled scripts have no source")
     args = ap.parse_args()
-
-    missing = compiled_without_source(args.src)
-    if missing and not args.force:
-        sys.exit(f"{len(missing)} compiled scripts have no source (e.g. {missing[0]}); their text would be missed. Use --force to subset anyway.")
 
     fonts = sorted(p for p in args.src.rglob("*") if p.is_file() and p.suffix.lower() in FONT_EXTS
                    and p.stat().st_size > args.min_mb * 1e6
@@ -79,6 +60,9 @@ def main():
         for old in args.dest.rglob("*"):
             if old.is_file() and old.relative_to(args.dest) not in wanted:
                 old.unlink()
+
+    # The build takes this folder as an overlay even when it's empty.
+    args.dest.mkdir(parents=True, exist_ok=True)
 
     if not fonts:
         print("No fonts to subset.")

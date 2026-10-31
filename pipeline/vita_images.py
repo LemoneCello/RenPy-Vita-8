@@ -41,7 +41,7 @@ from pathlib import Path, PurePosixPath
 
 from PIL import Image
 
-from vita_common import progress
+from vita_common import progress, script_texts
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
 VITA_SCREEN = (960, 544)
@@ -173,8 +173,7 @@ def find_images(src, prefixes):
 def game_size(game_dir):
     """The game's screen size from its scripts, or None if they don't say."""
     found = {}
-    for path in sorted(game_dir.rglob("*.rpy")):
-        text = path.read_text(encoding="utf-8", errors="replace")
+    for _path, text in script_texts(game_dir):
         if m := GUI_INIT_RE.search(text):
             return int(m.group(1)), int(m.group(2))
         for key, value in SCREEN_SIZE_RE.findall(text):
