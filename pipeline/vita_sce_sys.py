@@ -258,6 +258,8 @@ def main():
     if len(stitle.encode("utf-8")) > 51:
         stitle = stitle.encode("utf-8")[:51].decode("utf-8", "ignore")
 
+    if args.art and not args.art.is_file():
+        sys.exit(f"Art {args.art} not found (paths are relative to the workspace)")
     if args.art:
         art, source = Image.open(args.art).convert("RGBA"), args.art
     else:

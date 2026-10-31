@@ -9,6 +9,8 @@
 [game]
 title_id = "ABCD00001"            # app folder ux0:app/ABCD00001 (9 uppercase letters/digits)
 # title = "My Game"               # default: config.name from the game's scripts
+# art = "livearea.png"            # bubble icon and LiveArea picture (default: the game's
+                                  # loading screen, else its main menu art)
 dir = "MyGame-1.0-pc/game"        # the PC release's game/ directory
 renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs vita_story.py)
 
