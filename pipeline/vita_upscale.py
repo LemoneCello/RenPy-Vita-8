@@ -30,8 +30,9 @@ nothing. Real-ESRGAN: BSD-3-Clause, https://github.com/xinntao/Real-ESRGAN.
 import argparse
 import hashlib
 import sys
-import urllib.request
 from pathlib import Path
+
+from vita_common import download
 
 # Downloads and results are kept in the workspace (the current directory).
 ROOT = Path.cwd()
@@ -57,9 +58,7 @@ def model_path(name):
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         print(f"downloading {url}")
-        tmp = path.with_suffix(".part")
-        urllib.request.urlretrieve(url, tmp)
-        tmp.replace(path)
+        download(url, path)
     if digest and sha256(path) != digest:
         sys.exit(f"{path}: unexpected SHA-256 (delete it to download again)")
     return path

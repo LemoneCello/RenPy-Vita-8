@@ -3,9 +3,34 @@
 import io
 import pickle
 import sys
+import time
+import urllib.error
+import urllib.request
 import zlib
 
 CHUNK = 1 << 20
+
+
+# --- Downloads ------------------------------------------------------------
+
+def download(url, path, attempts=4):
+    """Downloads URL to PATH (via PATH.part, so a broken download never looks
+    finished), retrying after connection resets and timeouts. HTTP errors
+    such as 404 fail at once."""
+    tmp = path.with_suffix(".part")
+    for attempt in range(1, attempts + 1):
+        try:
+            urllib.request.urlretrieve(url, tmp)
+            break
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, OSError) as e:
+            if attempt == attempts:
+                raise
+            delay = 5 * attempt
+            print(f"  download of {url} failed ({e}); retrying in {delay} s", file=sys.stderr, flush=True)
+            time.sleep(delay)
+    tmp.replace(path)
 
 
 # --- RPA reading ----------------------------------------------------------

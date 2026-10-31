@@ -42,10 +42,9 @@ import shutil
 import subprocess
 import sys
 import time
-import urllib.request
 from pathlib import Path
 
-from vita_common import progress
+from vita_common import download, progress
 
 HERE = Path(__file__).resolve().parent
 PATCHES = HERE / "patches"
@@ -209,9 +208,7 @@ class Toolchain:
             self.downloads.mkdir(parents=True, exist_ok=True)
             if self.status:
                 self.status.update(f"{self.step}: downloading {path.name}")
-            tmp = path.with_suffix(".part")
-            urllib.request.urlretrieve(url, tmp)
-            tmp.replace(path)
+            download(url, path)
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         if digest != sha256:
             raise StepFailed(f"{path}: SHA-256 {digest}, expected {sha256} (delete it to download again)")

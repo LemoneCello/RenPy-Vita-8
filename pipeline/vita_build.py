@@ -52,12 +52,11 @@ import pickle
 import re
 import shutil
 import sys
-import urllib.request
 import zipfile
 import zlib
 from pathlib import Path, PurePosixPath
 
-from vita_common import progress
+from vita_common import download, progress
 
 # The pipeline's own files (port/, rpy/) are next to this script.
 HERE = Path(__file__).resolve().parent
@@ -153,9 +152,7 @@ def fetch_port_zip(port_zip):
     url = PORT_URL + port_zip.name
     print(f"downloading {url}")
     port_zip.parent.mkdir(parents=True, exist_ok=True)
-    tmp = port_zip.with_suffix(".part")
-    urllib.request.urlretrieve(url, tmp)
-    tmp.replace(port_zip)
+    download(url, port_zip)
 
 
 def add_port_zip(mirror, port_zip):
