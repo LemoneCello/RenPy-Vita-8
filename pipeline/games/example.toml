@@ -20,6 +20,12 @@ renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs vita_story.p
 # story_renpy = "OtherGame-pc"    # for a game made with Ren'Py 7 or older (Python 2): any
                                   # Ren'Py 8 desktop build to run vita_story.py; without
                                   # it the story split is skipped
+# screen_variants = "vita large pc"  # Ren'Py's layout variants; default "vita small phone touch
+                                  # mobile" (the phone layout). For a game whose phone layout
+                                  # doesn't fit its own GUI (text outside its text box...)
+# base_extra = ["extras"]         # files or folders of the PC release to put next to game/
+                                  # (ones the scripts name, like "../extras/x.txt", are found
+                                  # by themselves)
 
 [build]
 # port_build = "build/port/vita"  # the eboot (vita_port_build.py's default output)

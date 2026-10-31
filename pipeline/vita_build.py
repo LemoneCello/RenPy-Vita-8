@@ -17,7 +17,11 @@ should be on the Vita, and optionally a VPK of it. Later sources win:
   6. --game           the extracted game/ tree (vita_extract.py)
   7. --overlay        game/ overlays, in order (vita_images.py, ...)
   8. --compiled       compiled-script overlay (vita_story.py), .rpyc included
-  9. rpy/             compatibility scripts, into game/
+  9. rpy/             compatibility scripts, into game/; also rpy/py2/ for a
+                      game whose compiled scripts hold Python 2 code
+ 10. --base           files of the PC release next to game/ that the scripts
+                      use ("../NAME/...", config.basedir + "/NAME"), plus any
+                      --base-extra NAME
 
 Rules applied to game/: Ren'Py's own presplash images are left out (they
 crash the port; port/vita_presplash.py draws them from the .bin files
@@ -56,7 +60,7 @@ import zipfile
 import zlib
 from pathlib import Path, PurePosixPath
 
-from vita_common import download, progress
+from vita_common import download, progress, script_texts, scripts_python
 
 # The pipeline's own files (port/, rpy/) are next to this script.
 HERE = Path(__file__).resolve().parent
@@ -134,8 +138,8 @@ class Mirror(object):
         dest.write_bytes(data)
         self.sources[rel] = label
 
-    def add_tree(self, src, prefix, label, pattern="*", skip_rpyc=False):
-        for path in sorted(src.rglob(pattern)):
+    def add_tree(self, src, prefix, label, pattern="*", skip_rpyc=False, recursive=True):
+        for path in sorted(src.rglob(pattern) if recursive else src.glob(pattern)):
             if not path.is_file():
                 continue
             rel = f"{prefix}{path.relative_to(src).as_posix()}"
@@ -143,6 +147,26 @@ class Mirror(object):
                 self.skipped.append((rel, f"compiled script from {label}"))
                 continue
             self.add_file(path, rel, label)
+
+
+# A file or folder next to game/ named in a script: "../NAME/..." (a path
+# relative to game/) or config.basedir + "/NAME" / os.path.join(config.basedir, "NAME").
+BASE_REF_RES = [
+    re.compile(r"""["']\.\./([^/\\"'\n]+)"""),
+    re.compile(r"""basedir\s*(?:\+|,)\s*["'][/\\]?([^/\\"'\n]+)"""),
+]
+# Parts of a PC release that are never copied this way.
+BASE_SKIP = {"game", "renpy", "lib", "log.txt", "traceback.txt", "errors.txt"}
+
+
+def base_files(base, game_dir):
+    """Names of files and folders in the PC release next to game/ that the
+    game's scripts refer to."""
+    names = set()
+    for _path, text in script_texts(game_dir):
+        for pattern in BASE_REF_RES:
+            names.update(m.group(1) for m in pattern.finditer(text))
+    return sorted(n for n in names if n not in BASE_SKIP and (base / n).exists())
 
 
 def fetch_port_zip(port_zip):
@@ -295,6 +319,12 @@ def main(argv):
                     help="game/ overlay, repeatable, applied in order (default build/images/game)")
     ap.add_argument("--compiled", type=Path, help="compiled-script overlay for game/, .rpyc kept (vita_story.py output)")
     ap.add_argument("--rpy", type=Path, default=HERE / "rpy", help="compatibility scripts for game/")
+    ap.add_argument("--screen-variants", metavar="NAMES",
+                    help="screen variants for Ren'Py instead of the port's 'vita small phone touch mobile', "
+                         "e.g. 'vita large pc' (written to vita_variants.txt)")
+    ap.add_argument("--base", type=Path, help="the PC release, for files next to game/ that the scripts use")
+    ap.add_argument("--base-extra", action="append", default=[], metavar="NAME",
+                    help="also copy this file or folder of --base next to game/ (repeatable)")
     ap.add_argument("--out", type=Path, default=Path("build/app"))
     ap.add_argument("--vpk", type=Path, help="also write a VPK here")
     ap.add_argument("--no-pack", action="store_true", help="keep game/ assets as loose files")
@@ -335,7 +365,24 @@ def main(argv):
         mirror.add_tree(overlay, "game/", f"overlay {overlay}", skip_rpyc=True)
     if args.compiled:
         mirror.add_tree(args.compiled, "game/", f"compiled {args.compiled}")
-    mirror.add_tree(args.rpy, "game/", "rpy/", "*.rpy")
+    mirror.add_tree(args.rpy, "game/", "rpy/", "*.rpy", recursive=False)
+    if args.screen_variants:
+        mirror.add_bytes((args.screen_variants.strip() + "\n").encode(), "vita_variants.txt", "--screen-variants")
+    if scripts_python(args.game) == 2:
+        print("The game's scripts hold Python 2 code: adding rpy/py2/")
+        mirror.add_tree(args.rpy / "py2", "game/", "rpy/py2/", "*.rpy", recursive=False)
+    if args.base:
+        names = sorted(set(base_files(args.base, args.game)) | set(args.base_extra))
+        for name in names:
+            src = args.base / name
+            if src.is_dir():
+                mirror.add_tree(src, f"{name}/", f"base {name}")
+            elif src.is_file():
+                mirror.add_file(src, name, f"base {name}")
+            else:
+                sys.exit(f"--base-extra {name}: not in {args.base}")
+        if names:
+            print(f"From {args.base}, next to game/: {', '.join(names)}")
 
     check_presplash(mirror, [args.game] + overlays, args.presplash)
 

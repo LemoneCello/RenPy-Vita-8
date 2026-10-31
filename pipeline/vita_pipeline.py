@@ -41,6 +41,11 @@ Settings file (TOML):
   renpy = "path"           # the PC release's base directory (for vita_story)
   story_renpy = "path"     # optional: another Ren'Py 8 desktop build for vita_story,
                            # for games made with Ren'Py 7 or older (Python 2)
+  base_extra = ["NAME"]    # optional: files or folders of the PC release to copy next
+                           # to game/ (those the scripts name are found by themselves)
+  screen_variants = "..."  # optional: Ren'Py screen variants instead of the port's
+                           # "vita small phone touch mobile", e.g. "vita large pc" for a
+                           # game whose phone layout doesn't fit its GUI
 
   [build]
   port_build = "build/port/vita"  # optional; vita_port_build.py's default output
@@ -110,7 +115,11 @@ def plan(cfg, variant, vpk, usb=None):
     build_args = ["--title-id", title_id, "--game", d["extract"],
                   "--overlay", d["images"], "--overlay", d["fonts"], "--overlay", d["video"],
                   "--compiled", d["story"], "--port-build", port_build,
-                  "--presplash", d["presplash"], "--sce-sys", d["sce_sys"], "--out", d["app"]]
+                  "--presplash", d["presplash"], "--sce-sys", d["sce_sys"], "--out", d["app"],
+                  "--base", game["renpy"]]
+    build_args += [f"--base-extra={n}" for n in game.get("base_extra", [])]
+    if "screen_variants" in game:
+        build_args += ["--screen-variants", game["screen_variants"]]
     if vpk:
         build_args += ["--vpk", root / f"{title_id}.vpk"]
 

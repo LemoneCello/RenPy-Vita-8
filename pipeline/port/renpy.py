@@ -295,12 +295,29 @@ def main():
         # Ren'Py's choose_variants() has no Vita case, so it picks the desktop
         # "pc large" layout: tiny text on a 5" screen, PC-only menu items. Use
         # the phone variants instead (bigger text and quick buttons in the
-        # standard gui.rpy), plus "vita" for Vita-specific code.
+        # standard gui.rpy), plus "vita" for Vita-specific code. A game whose
+        # phone layout doesn't fit its own GUI gets other variants from
+        # vita_variants.txt next to this file (the pipeline's
+        # screen_variants setting writes it).
+        try:
+            with open(os.path.join(sys.argv[0], "vita_variants.txt")) as f:
+                os.environ.setdefault("RENPY_VARIANT", f.read().strip())
+        except OSError:
+            pass
         os.environ.setdefault("RENPY_VARIANT", "vita small phone touch mobile")
         # Ren'Py's GPU performance test costs ~4 s at every start and can only
         # warn about a GPU that is what it is.
         os.environ.setdefault("RENPY_PERFORMANCE_TEST", "0")
         renpy_base = sys.argv[0]
+        # tempfile looks for /tmp and the like, which the Vita doesn't have:
+        # give it a folder inside the app.
+        if "TMPDIR" not in os.environ:
+            tmp = os.path.join(renpy_base, "tmp")
+            try:
+                os.makedirs(tmp, exist_ok=True)
+                os.environ["TMPDIR"] = tmp
+            except OSError:
+                pass
     else:
         renpy_base = path_to_renpy_base()
 

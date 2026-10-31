@@ -73,6 +73,8 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
    dir = "MyGame-1.0-pc/game"        # the PC release's game/ folder
    renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs the story stage)
    # story_renpy = "OtherGame-pc"    # for a game made with Ren'Py 7 or older: a Ren'Py 8 desktop build for the story stage
+   # screen_variants = "vita large pc"  # the desktop layout, for a game whose phone layout doesn't fit its GUI (default "vita small phone touch mobile")
+   # base_extra = ["extras"]         # files or folders of the PC release to put next to game/ (ones the scripts name are found by themselves)
 
    [build]
    # port_build = "build/port/vita"  # the eboot, see "Building the eboot"
@@ -136,7 +138,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 | `presplash` | `vita_presplash_build.py` | Prepares the loading screen. Images much smaller than the screen are enlarged with Real-ESRGAN (`vita_upscale.py`). |
 | `sce_sys` | `vita_sce_sys.py` | Writes `param.sfo`, the bubble icon and LiveArea art, and the package header (`package/head.bin`) the system needs to register the app. The art is the game's loading screen (its `presplash` images), else its main menu art, unless the settings file names other pictures: `art` for all three places, or `art_icon` (the bubble, 128×128), `art_background` (the LiveArea, 840×500) and `art_start` (the picture on the LiveArea's start button, 280×158) for one each. Pictures are scaled and centre-cropped to those sizes, so one with the same shape works best. |
 | `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for Eternum). It runs under the game's desktop Ren'Py, which must be Ren'Py 8; for an older game, `story_renpy` can name any Ren'Py 8 desktop build, and without one the split is skipped. |
-| `build` | `vita_build.py` | Assembles the app folder: port files, eboot, game, overlays and `rpy/` hooks. Packs assets into archives, because loose files are slow on the Vita. Writes the VPK. |
+| `build` | `vita_build.py` | Assembles the app folder: port files, eboot, game, overlays and `rpy/` hooks (plus `rpy/py2/` for games whose scripts hold Python 2 code, made with Ren'Py 7 or older). Copies files of the PC release next to `game/` that the scripts use (`"../NAME/..."`, `config.basedir + "/NAME"`). Packs assets into archives, because loose files are slow on the Vita. Writes the VPK. |
 | `deploy` | `vitactl.py sync` | Only with `--deploy` or `--usb`, or when named in `--stages`: sends only what changed to `ux0:app/TITLE_ID`, over Wi-Fi, USB or a card reader, and registers a new game (over Wi-Fi; otherwise it says how). |
 
 The app folder ends up in `<root>/<TITLE_ID>/full/app/<TITLE_ID>`, next to the VPK. Reruns only redo what changed: extracting, movies and images skip files that haven't changed since the last run, and the VPK is only rewritten when the app's contents changed. The first full run for Eternum takes about 20 minutes, mostly encoding its 449 movies. A rerun with nothing changed takes about 20 s. Its VPK is 3.0 GiB and takes about 10 s to write.
@@ -176,7 +178,8 @@ The engine changes are on the `vita-perf` branches of this repository and its tw
 - **gl2 renderer (experimental, off by default):** Ren'Py's shader renderer on the Vita's OpenGL ES 2.0. To switch it on, create an empty file named `vita_gl2` in the app folder. It's as fast as the default renderer in play, but a dissolve between two playing movies drops to ~38 fps.
 
 **The launcher, in `port/`** (shipped to the app folder):
-- `renpy.py`: the launcher with Vita settings: phone layout variants, no GPU performance test, renderer choice, a clean exit
+- `renpy.py`: the launcher with Vita settings: phone layout variants, no GPU performance test, renderer choice, a temp folder inside the app, a clean exit
+- `fcntl.py`: a stand-in for the `fcntl` module the Vita's Python lacks; file locks always succeed (games use them to stop a second copy running)
 - `vita_boot.py`: boot speed-ups (zip imports, file lookups, bytecode cache format, compiled screen expressions, garbage collection)
 - `vita_presplash.py`: a GLES loading screen with a progress bar
 
@@ -199,6 +202,8 @@ The engine changes are on the `vita-perf` branches of this repository and its tw
 | `vita_touch_targets.rpy` | Bigger quick-menu buttons for touch |
 | `vita_mobile.rpy` | Lets game code see `renpy.mobile` as True, for touch layouts |
 | `vita_gl2.rpy` | Settings for the gl2 renderer |
+| `vita_pad.rpy` | Keeps the controller on (the Vita's buttons), for games that switch it off for PC players |
+| `py2/vita_py2compat.rpy` | Python 2 games only: `renpy.file()` returns text, as it did under Python 2 |
 
 ## The Vita side
 
@@ -221,7 +226,7 @@ The engine changes are on the `vita-perf` branches of this repository and its tw
 
 The pipeline reads everything from the game's own files and Ren'Py's rules, without hard-coded names. Games that ship only compiled scripts (`.rpyc`, no `.rpy`) work too: the stages that look through the scripts read a rendering of the compiled files instead (`vita_common.rpyc_text`), made without running any of the game's code. A few things are still worth checking per game:
 - Fonts used for text that isn't in any script (typed names, generated text) would lose characters when subset. Keep them with `[stages.fonts] args = ["--keep", "FONT.ttf"]`.
-- Some games switch effects or layouts off for mobile variants. The port reports the Vita as `vita small phone touch mobile`.
+- Some games switch effects or layouts off for mobile variants. The port reports the Vita as `vita small phone touch mobile`. A game that kept the Ren'Py template's phone settings without fitting them to its own GUI (text drawn outside its text box, say) looks right with the desktop layout: `screen_variants = "vita large pc"`.
 - `--variant slice` needs a `[slice]` section listing the folders to include.
 
 ## Licence

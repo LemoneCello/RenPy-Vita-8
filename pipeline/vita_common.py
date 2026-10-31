@@ -392,6 +392,44 @@ def rpyc_text(data):
     return "\n".join(out) + "\n"
 
 
+def _pycode_versions(obj, seen):
+    """Python versions (2 or 3) of the PyCode stand-ins inside obj."""
+    if isinstance(obj, (str, int, float, bytes, type, type(None))) or id(obj) in seen:
+        return
+    seen.add(id(obj))
+    if _cls(obj) == "PyCode":
+        state = getattr(obj, "_state", None)
+        if isinstance(state, tuple) and len(state) >= 4:
+            # Ren'Py before 7.4 stored no version: its code is Python 2.
+            yield state[4] if len(state) > 4 else 2
+        return
+    if isinstance(obj, dict):
+        items = list(obj.values())
+    elif isinstance(obj, (list, tuple, set, frozenset)):
+        items = list(obj)
+    else:
+        items = []
+    attrs = getattr(obj, "__dict__", None)
+    if attrs:
+        items += [v for k, v in attrs.items() if k != "next"]
+    state = getattr(obj, "_state", None)
+    if isinstance(state, tuple):
+        items += list(state)
+    for item in items:
+        yield from _pycode_versions(item, seen)
+
+
+def scripts_python(game_dir):
+    """The Python version (2 or 3) of the code in the compiled scripts under
+    game_dir: 2 for a game made with Ren'Py 7 or older. None if they hold no
+    Python. The first compiled script with Python decides: a game's scripts
+    are compiled by one Ren'Py."""
+    for path in sorted(game_dir.rglob("*.rpyc")):
+        for version in _pycode_versions(read_rpyc(path.read_bytes()), set()):
+            return version
+    return None
+
+
 def script_texts(game_dir, modules=True):
     """(path, text) for each script under game_dir: the .rpy (and, with modules,
     .rpym) sources, plus a rendering of each compiled script with no source
