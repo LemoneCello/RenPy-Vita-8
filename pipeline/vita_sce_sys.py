@@ -214,7 +214,16 @@ def game_name(game_dir):
     return None
 
 
+# Where each picture goes: (file under sce_sys/, size).
+ART_PLACES = {
+    "icon": ("icon0.png", (128, 128)),                                   # the bubble
+    "background": ("livearea/contents/bg.png", (840, 500)),              # the LiveArea
+    "start": ("livearea/contents/startup.png", (280, 158)),              # its start button
+}
+
+
 def build_sce_sys(sce_sys, title, stitle, title_id, art):
+    """art: one picture for every place, or {place: picture} for each of ART_PLACES."""
     if sce_sys.exists():
         shutil.rmtree(sce_sys)
     sce_sys.mkdir(parents=True)
@@ -224,11 +233,9 @@ def build_sce_sys(sce_sys, title, stitle, title_id, art):
     parsed = parse_sfo(sfo)
     print(f"  param.sfo: TITLE_ID={parsed['TITLE_ID']} TITLE={parsed['TITLE']!r} STITLE={parsed['STITLE']!r}")
 
-    save_pal8(art, (128, 128), sce_sys / "icon0.png")
-    contents = sce_sys / "livearea" / "contents"
-    save_pal8(art, (840, 500), contents / "bg.png")
-    save_pal8(art, (280, 158), contents / "startup.png")
-    (contents / "template.xml").write_text(LIVEAREA_TEMPLATE, encoding="utf-8")
+    for place, (name, size) in ART_PLACES.items():
+        save_pal8(art[place] if isinstance(art, dict) else art, size, sce_sys / name)
+    (sce_sys / "livearea" / "contents" / "template.xml").write_text(LIVEAREA_TEMPLATE, encoding="utf-8")
 
     (sce_sys / "package").mkdir()
     (sce_sys / "package" / "head.bin").write_bytes(make_head_bin(title_id, parsed["CONTENT_ID"]))
@@ -246,6 +253,9 @@ def main():
     ap.add_argument("--title", help="name under the bubble (default: the game's config.name)")
     ap.add_argument("--stitle", help="short title (default: the title)")
     ap.add_argument("--art", type=Path, help="image for the icon and LiveArea (default: presplash or menu art)")
+    ap.add_argument("--art-icon", type=Path, help="image for the bubble icon only (default: --art)")
+    ap.add_argument("--art-background", type=Path, help="image for the LiveArea background only (default: --art)")
+    ap.add_argument("--art-start", type=Path, help="image for the LiveArea's start button only (default: --art)")
     ap.add_argument("--out", type=Path, default=Path("build/sce_sys"))
     args = ap.parse_args()
 
@@ -258,16 +268,23 @@ def main():
     if len(stitle.encode("utf-8")) > 51:
         stitle = stitle.encode("utf-8")[:51].decode("utf-8", "ignore")
 
-    if args.art and not args.art.is_file():
-        sys.exit(f"Art {args.art} not found (paths are relative to the workspace)")
-    if args.art:
-        art, source = Image.open(args.art).convert("RGBA"), args.art
-    else:
-        art, source = game_art(args.game)
-        if art is None:
+    chosen = {place: getattr(args, f"art_{place}") or args.art for place in ART_PLACES}
+    for path in set(chosen.values()) - {None}:
+        if not path.is_file():
+            sys.exit(f"Art {path} not found (paths are relative to the workspace)")
+    if None in chosen.values():
+        default, source = game_art(args.game)
+        if default is None:
             sys.exit("No presplash or menu art found; pass --art")
+    art, sources = {}, {}
+    for place, path in chosen.items():
+        art[place] = Image.open(path).convert("RGBA") if path else default
+        sources[place] = path or source
 
-    print(f"Generating {args.out} (art: {source})")
+    if len(set(sources.values())) == 1:
+        print(f"Generating {args.out} (art: {sources['icon']})")
+    else:
+        print(f"Generating {args.out} (art: " + ", ".join(f"{p} {s}" for p, s in sources.items()) + ")")
     build_sce_sys(args.out, title, stitle, args.title_id, art)
 
 

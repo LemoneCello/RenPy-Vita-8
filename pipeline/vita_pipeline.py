@@ -99,8 +99,9 @@ def plan(cfg, variant, vpk, usb=None):
     sce_sys = ["--game", d["extract"], "--title-id", title_id, "--out", d["sce_sys"]]
     if "title" in game:
         sce_sys += ["--title", game["title"]]
-    if "art" in game:
-        sce_sys += ["--art", game["art"]]
+    for key in ("art", "art_icon", "art_background", "art_start"):
+        if key in game:
+            sce_sys += [f"--{key.replace('_', '-')}", game[key]]
 
     build_args = ["--title-id", title_id, "--game", d["extract"],
                   "--overlay", d["images"], "--overlay", d["fonts"], "--overlay", d["video"],

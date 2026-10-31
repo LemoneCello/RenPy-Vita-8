@@ -63,7 +63,10 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
    [game]
    title_id = "ABCD00001"            # the app's ID: 9 capital letters or digits
    # title = "..."                   # default: the game's config.name
-   # art = "livearea.png"            # bubble icon and LiveArea picture; default: the game's loading screen
+   # art = "livearea.png"            # bubble icon and LiveArea pictures; default: the game's loading screen
+   # art_icon = "icon.png"           # or per place, each defaulting to art: the bubble,
+   # art_background = "bg.png"       #   the LiveArea background,
+   # art_start = "start.png"         #   and the picture on its start button
    dir = "MyGame-1.0-pc/game"        # the PC release's game/ folder
    renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs the story stage)
 
@@ -127,7 +130,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 | `images` | `vita_images.py` | Shrinks every image of at least 65,536 pixels (256×256) by the factor that makes the game's screen fit the Vita's: 2 for a 1920×1080 game (full-screen images become 960×540), 4/3 for 1280×720, none for games no bigger than the Vita's screen. The game's size comes from its scripts (`gui.init(W, H)`, or `config.screen_width` and `screen_height`); `--factor` overrides it. Every large image shrinks by the same factor, so it keeps its size relative to the screen; smaller images, such as icons and frame borders, are left alone. Also crops large transparent margins. A generated hook tells Ren'Py to draw the shrunk images at their original size and pads the cropped ones back. |
 | `fonts` | `vita_fonts.py` | Cuts fonts above 1 MB down to the characters the scripts use. |
 | `presplash` | `vita_presplash_build.py` | Prepares the loading screen. Images much smaller than the screen are enlarged with Real-ESRGAN (`vita_upscale.py`). |
-| `sce_sys` | `vita_sce_sys.py` | Writes `param.sfo`, the bubble icon and LiveArea art, and the package header (`package/head.bin`) the system needs to register the app. The art is the game's loading screen (its `presplash` images), else its main menu art, unless `art` in the settings file names another picture. It's scaled and centre-cropped to 840×500 (LiveArea), 280×158 (the picture on the LiveArea's start button) and 128×128 (the bubble), so a 16:9 picture with its subject in the middle works best. |
+| `sce_sys` | `vita_sce_sys.py` | Writes `param.sfo`, the bubble icon and LiveArea art, and the package header (`package/head.bin`) the system needs to register the app. The art is the game's loading screen (its `presplash` images), else its main menu art, unless the settings file names other pictures: `art` for all three places, or `art_icon` (the bubble, 128×128), `art_background` (the LiveArea, 840×500) and `art_start` (the picture on the LiveArea's start button, 280×158) for one each. Pictures are scaled and centre-cropped to those sizes, so one with the same shape works best. |
 | `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for the test game). |
 | `build` | `vita_build.py` | Assembles the app folder: port files, eboot, game, overlays and `rpy/` hooks. Packs assets into archives, because loose files are slow on the Vita. Writes the VPK. |
 | `deploy` | `vitactl.py sync` | Only with `--deploy` or `--usb`, or when named in `--stages`: sends only what changed to `ux0:app/TITLE_ID`, over Wi-Fi, USB or a card reader, and registers a new game (over Wi-Fi; otherwise it says how). |
