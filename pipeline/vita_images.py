@@ -22,6 +22,7 @@ zero after premultiplying anyway.
 """
 
 import argparse
+import json
 import math
 import shutil
 import sys
@@ -196,7 +197,11 @@ def write_hook(dest, scaled, factor, trims):
     # `factor` needs 1/factor to be drawn at its original size.
     entries = "\n".join(f'            "{str(rel).lower()}": {1 / factor!r},' for rel in sorted(scaled))
     trim_entries = "\n".join(f'            "{str(rel).lower()}": {trims[rel]!r},' for rel in sorted(trims))
-    (dest / HOOK_NAME).write_text(HOOK_TEMPLATE.format(entries=entries, trims=trim_entries), encoding="utf-8")
+    text = HOOK_TEMPLATE.format(entries=entries, trims=trim_entries)
+    hook = dest / HOOK_NAME
+    # Rewritten only when it changes, so unchanged builds stay unchanged.
+    if not hook.exists() or hook.read_text(encoding="utf-8") != text:
+        hook.write_text(text, encoding="utf-8")
 
 
 def mib(n):
@@ -228,26 +233,68 @@ def main():
             print(f"  {rel}")
         return
 
-    if args.dest.exists():
-        shutil.rmtree(args.dest)
-    args.dest.mkdir(parents=True)
+    # Incremental, like the extract and video stages: a record next to the
+    # overlay (not in it, so it isn't shipped) keeps each image's source size
+    # and modification time and its result. Images that haven't changed since
+    # are kept; different settings start over.
+    settings = {"factor": args.factor, "min_pixels": args.min_pixels, "jpeg_quality": args.jpeg_quality,
+                "trim_below": args.trim_below}
+    record_path = args.dest.parent / f"{args.dest.name}.images.json"
+    try:
+        record = json.loads(record_path.read_text())
+    except (OSError, ValueError):
+        record = {}
+    if record.get("settings") != settings:
+        record = {"settings": settings, "files": {}}
+        if args.dest.exists():
+            shutil.rmtree(args.dest)
+    args.dest.mkdir(parents=True, exist_ok=True)
+    old = record["files"]
 
-    jobs = [(args.src, args.dest, rel, args.factor, args.min_pixels, args.jpeg_quality, args.trim_below) for rel in rels]
+    results, todo = {}, []
+    for rel in rels:
+        st = (args.src / rel).stat()
+        entry = old.get(str(rel))
+        if (entry and entry["mtime"] == st.st_mtime_ns and entry["bytes"] == st.st_size
+                and (entry["status"] == "small" or (args.dest / rel).exists())):
+            results[rel] = entry
+        else:
+            todo.append(rel)
+
+    # Outputs whose image is gone or is now left untouched.
+    wanted = {str(rel) for rel, e in results.items() if e["status"] == "scaled"} | {str(rel) for rel in todo}
+    stale = [p for p in args.dest.rglob("*")
+             if p.is_file() and p.name != HOOK_NAME and str(p.relative_to(args.dest)) not in wanted]
+    for p in stale:
+        p.unlink()
+    print(f"{len(results)} unchanged since the last run, {len(todo)} to process, {len(stale)} stale removed")
+
+    jobs = [(args.src, args.dest, rel, args.factor, args.min_pixels, args.jpeg_quality, args.trim_below) for rel in todo]
+    with ProcessPoolExecutor(args.jobs) as pool, progress("Resizing images", total=len(jobs)) as bar:
+        for rel, status, old_size, new, trim in pool.map(process, jobs, chunksize=8):
+            bar.advance(1, current=str(rel))
+            st = (args.src / rel).stat()
+            results[rel] = {"mtime": st.st_mtime_ns, "bytes": st.st_size, "status": status,
+                            "old": list(old_size), "new": list(new) if new else None,
+                            "trim": list(trim) if trim else None}
+
+    record["files"] = {str(rel): e for rel, e in sorted(results.items(), key=lambda kv: str(kv[0]))}
+    record_path.write_text(json.dumps(record))
+
     scaled, small, odd = [], 0, 0
     trims = {}
     before = after = 0
-    with ProcessPoolExecutor(args.jobs) as pool, progress("Resizing images", total=len(jobs)) as bar:
-        for rel, status, (w, h), new, trim in pool.map(process, jobs, chunksize=8):
-            bar.advance(1, current=str(rel))
-            if status == "small":
-                small += 1
-                continue
-            scaled.append(rel)
-            if trim is not None:
-                trims[rel] = trim
-            odd += bool(w % args.factor or h % args.factor)
-            before += w * h * 4
-            after += new[0] * new[1] * 4
+    for rel, e in results.items():
+        if e["status"] == "small":
+            small += 1
+            continue
+        (w, h), new = e["old"], e["new"]
+        scaled.append(rel)
+        if e["trim"] is not None:
+            trims[rel] = tuple(e["trim"])
+        odd += bool(w % args.factor or h % args.factor)
+        before += w * h * 4
+        after += new[0] * new[1] * 4
 
     write_hook(args.dest, scaled, args.factor, trims)
 

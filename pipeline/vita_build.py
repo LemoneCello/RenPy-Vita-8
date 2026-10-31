@@ -76,7 +76,10 @@ LOOSE_EXTS = {".rpy", ".rpyc", ".rpym", ".rpymc",
 RPA_KEY = 0x42424242
 
 # Already-compressed formats go into the VPK stored, everything else deflated.
-STORED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".mp3", ".ogg", ".opus", ".zip", ".webm", ".mp4", ".bin"}
+STORED_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".mp3", ".ogg", ".opus", ".zip", ".webm", ".mp4", ".bin",
+               # The packed archives hold mostly the above: deflating them again
+               # took most of the VPK's writing time for a few percent.
+               ".rpa"}
 
 
 def game_rule(rel):
@@ -250,6 +253,16 @@ def pack(app_dir, mirror):
             d.rmdir()
 
 
+def app_fingerprint(app_dir):
+    """A hash of every file's path and content (and the VPK format)."""
+    h = hashlib.sha256(repr(sorted(STORED_EXTS)).encode())
+    for path in sorted(p for p in app_dir.rglob("*") if p.is_file()):
+        h.update(path.relative_to(app_dir).as_posix().encode() + b"\0")
+        with open(path, "rb") as f:
+            h.update(hashlib.file_digest(f, "sha1").digest())
+    return h.hexdigest()
+
+
 def build_vpk(app_dir, vpk_path):
     vpk_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = vpk_path.with_suffix(".part")
@@ -354,8 +367,16 @@ def main(argv):
         print(f"  {loose} files left loose in game/")
 
     if args.vpk:
-        build_vpk(app_dir, args.vpk)
-        print(f"Wrote {args.vpk} ({mib(args.vpk.stat().st_size)})")
+        # Written only when the app's contents changed since the last VPK.
+        stamp = args.vpk.with_name(args.vpk.name + ".contents")
+        fingerprint = app_fingerprint(app_dir)
+        if args.vpk.exists() and stamp.exists() and stamp.read_text() == fingerprint:
+            print(f"{args.vpk} is up to date")
+        else:
+            stamp.unlink(missing_ok=True)
+            build_vpk(app_dir, args.vpk)
+            stamp.write_text(fingerprint)
+            print(f"Wrote {args.vpk} ({mib(args.vpk.stat().st_size)})")
 
 
 if __name__ == "__main__":

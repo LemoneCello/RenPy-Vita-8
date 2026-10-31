@@ -127,7 +127,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 | `build` | `vita_build.py` | Assembles the app folder: port files, eboot, game, overlays and `rpy/` hooks. Packs assets into archives, because loose files are slow on the Vita. Writes the VPK. |
 | `deploy` | `vitactl.py sync` | Only with `--deploy`: uploads only what changed, to `ux0:app/TITLE_ID`. |
 
-The app folder ends up in `<root>/<TITLE_ID>/full/app/<TITLE_ID>`, next to the VPK. Every stage is incremental. The first full run for the test game takes about 20 minutes, mostly encoding its 449 movies; its VPK is 3.0 GiB and takes under a minute to write.
+The app folder ends up in `<root>/<TITLE_ID>/full/app/<TITLE_ID>`, next to the VPK. Reruns only redo what changed: extracting, movies and images skip files that haven't changed since the last run, and the VPK is only rewritten when the app's contents changed. The first full run for the test game takes about 20 minutes, mostly encoding its 449 movies. A rerun with nothing changed takes about 20 s. Its VPK is 3.0 GiB and takes about 10 s to write.
 
 | Option | Does |
 |---|---|
