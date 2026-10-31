@@ -93,7 +93,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
      uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml --deploy
      ```
 
-   - **Over USB:** start VitaShell's USB mode (with the memory card as the USB device), mount the drive that appears on the computer, and pass its mount point with `--usb`. USB is much faster than Wi-Fi for large games. In the container, start it with that mount point, `run-container.sh --usb /path/to/card`, and use `/media/vita`:
+   - **Over USB:** start VitaShell's USB mode (with the memory card as the USB device), mount the drive that appears on the computer, and pass its mount point with `--usb`. USB is about three times faster than Wi-Fi: about 10–11 MB/s against about 3 MB/s, so a 3 GB game takes about 5 minutes instead of about 15. In the container, start it with that mount point, `run-container.sh --usb /path/to/card`, and use `/media/vita`:
 
      ```
      uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml --usb /media/vita
