@@ -123,7 +123,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 |---|---|---|
 | `extract` | `vita_extract.py` | Takes the files out of the game's archives. Movies go to a separate tree. |
 | `video` | `vita_video.py` | Re-encodes movies to 960×540 H.264/AAC MP4 (CRF 18), the formats the Vita decodes. Adds silent sound to movies that have none. |
-| `images` | `vita_images.py` | Halves images above 256×256 and crops large transparent margins. A generated hook loads them at the right size and pads them back. |
+| `images` | `vita_images.py` | Shrinks every image of at least 65,536 pixels (256×256) by the same factor, 2 by default (`--factor`), so a 1920×1080 game's full-screen images become 960×540, the Vita's screen size, and everything else keeps its size relative to them. Smaller images, such as icons and frame borders, are left alone. Also crops large transparent margins. A generated hook tells Ren'Py to draw the shrunk images at their original size and pads the cropped ones back. |
 | `fonts` | `vita_fonts.py` | Cuts fonts above 1 MB down to the characters the scripts use. |
 | `presplash` | `vita_presplash_build.py` | Prepares the loading screen. Images much smaller than the screen are enlarged with Real-ESRGAN (`vita_upscale.py`). |
 | `sce_sys` | `vita_sce_sys.py` | Writes `param.sfo`, the bubble icon and LiveArea art, and the package header (`package/head.bin`) the system needs to register the app. |
