@@ -22,7 +22,9 @@ workspace/
   build/                 everything generated (toolchain, caches, outputs)
 ```
 
-`pipeline/container/` has a Debian image with everything the scripts need. `run-container.sh`, started from the workspace, mounts it at `/work` and shares the host network so the container can reach the Vita. The scripts use [uv](https://docs.astral.sh/uv/) (`uv run script.py`); each script declares its own dependencies.
+`pipeline/container/` has a Debian image with everything the scripts need. Start it with `RenPy-Vita-8/pipeline/container/run-container.sh` from the workspace. The container sees only the workspace, mounted at `/work`, and reaches the Vita over Wi-Fi through Docker's normal network. Options:
+- `--usb MOUNT` shares the Vita's memory card (see step 4 of "Running the pipeline").
+- `--dev` is for working on the pipeline itself. It adds a bigger image (sudo, Claude Code, desktop Ren'Py test runs), the host's network and the Vita's webcam feed. The scripts use [uv](https://docs.astral.sh/uv/) (`uv run script.py`); each script declares its own dependencies.
 
 ## Building the eboot
 
@@ -91,11 +93,13 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
      uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml --deploy
      ```
 
-   - **Over USB:** start VitaShell's USB mode (with the memory card as the USB device), mount the drive that appears on the computer, and pass its mount point with `--usb`. When it's done, eject the drive before leaving USB mode. USB is much faster than Wi-Fi for large games. In the container, the host's removable drives appear under `/media/host/` (`run-container.sh` shares `/run/media/$USER` or `/media/$USER`, or `VITA_MEDIA`).
+   - **Over USB:** start VitaShell's USB mode (with the memory card as the USB device), mount the drive that appears on the computer, and pass its mount point with `--usb`. USB is much faster than Wi-Fi for large games. In the container, start it with that mount point, `run-container.sh --usb /path/to/card`, and use `/media/vita`:
 
      ```
-     uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml --usb /media/host/VITA_CARD
+     uv run RenPy-Vita-8/pipeline/vita_pipeline.py mygame.toml --usb /media/vita
      ```
+
+     When it's done, leave the container (or just finish the copy), eject the drive on the computer, and then leave USB mode.
 
    Both keep the same record of what's on the card, so you can switch between them. After a run that wrote the VPK, `--stages deploy` (with `--usb` for USB) sends the same build without redoing anything.
 
