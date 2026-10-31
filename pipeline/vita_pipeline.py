@@ -39,8 +39,9 @@ Settings file (TOML):
   title = "..."            # optional, default: the game's config.name
   dir = "path/game"        # the PC release's game/ directory
   renpy = "path"           # the PC release's base directory (for vita_story)
-  story_renpy = "path"     # optional: another Ren'Py 8 desktop build for vita_story,
-                           # for games made with Ren'Py 7 or older (Python 2)
+  story_renpy = "path"     # optional: another Ren'Py 8 desktop build for vita_story
+                           # (by default the game's own, or for games made with Ren'Py 7
+                           # or older, the official SDK, downloaded once)
   base_extra = ["NAME"]    # optional: files or folders of the PC release to copy next
                            # to game/ (those the scripts name are found by themselves)
   presplash_background = "path"  # optional, with presplash_foreground: the loading screen

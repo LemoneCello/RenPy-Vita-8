@@ -72,7 +72,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
    # art_start = "start.png"         #   the picture on its start button, 280×158
    dir = "MyGame-1.0-pc/game"        # the PC release's game/ folder
    renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs the story stage)
-   # story_renpy = "OtherGame-pc"    # for a game made with Ren'Py 7 or older: a Ren'Py 8 desktop build for the story stage
+   # story_renpy = "OtherGame-pc"    # a Ren'Py 8 desktop build for the story stage instead of the game's own
    # presplash_background = "loading.png"      # the loading screen instead of the game's, with
    # presplash_foreground = "loading_full.png" #   the foreground revealed as loading goes on
    # screen_variants = "vita large pc"  # the desktop layout, for a game whose phone layout doesn't fit its GUI (default "vita small phone touch mobile")
@@ -139,7 +139,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 | `fonts` | `vita_fonts.py` | Cuts fonts above 1 MB down to the characters the scripts use. |
 | `presplash` | `vita_presplash_build.py` | Prepares the loading screen: the game's presplash images, or a pair named in the settings (`presplash_background`, `presplash_foreground`; the foreground is revealed left to right as loading goes on). A game without one gets its LiveArea background art (`art_background` or `art`, else its main menu art) filling the screen, with a progress bar near the bottom. Images much smaller than the screen are enlarged with Real-ESRGAN (`vita_upscale.py`). |
 | `sce_sys` | `vita_sce_sys.py` | Writes `param.sfo`, the bubble icon and LiveArea art, and the package header (`package/head.bin`) the system needs to register the app. The art is the game's loading screen (its `presplash` images), else its main menu art, unless the settings file names other pictures: `art` for all three places, or `art_icon` (the bubble, 128×128), `art_background` (the LiveArea, 840×500) and `art_start` (the picture on the LiveArea's start button, 280×158) for one each. Pictures are scaled and centre-cropped to those sizes, so one with the same shape works best. |
-| `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for Eternum). It runs under the game's desktop Ren'Py, which must be Ren'Py 8; for an older game, `story_renpy` can name any Ren'Py 8 desktop build, and without one the split is skipped. |
+| `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for Eternum). It loads the compiled scripts as real Ren'Py objects and writes them back, so it runs inside a desktop Ren'Py 8 on the PC (the port's own Ren'Py is built for the Vita only): the game's own, or, for a game made with Ren'Py 7 or older, the official Ren'Py 8.3.3 SDK, downloaded once (~140 MB) into `build/cache/`. |
 | `build` | `vita_build.py` | Assembles the app folder: port files, eboot, game, overlays and `rpy/` hooks (plus `rpy/py2/` for games whose scripts hold Python 2 code, made with Ren'Py 7 or older). Copies files of the PC release next to `game/` that the scripts use (`"../NAME/..."`, `config.basedir + "/NAME"`). Packs assets into archives, because loose files are slow on the Vita. Writes the VPK. |
 | `deploy` | `vitactl.py sync` | Only with `--deploy` or `--usb`, or when named in `--stages`: sends only what changed to `ux0:app/TITLE_ID`, over Wi-Fi, USB or a card reader, and registers a new game (over Wi-Fi; otherwise it says how). |
 

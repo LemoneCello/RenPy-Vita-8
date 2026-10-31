@@ -17,9 +17,9 @@ title_id = "ABCD00001"            # app folder ux0:app/ABCD00001 (9 uppercase le
 # art_start = "start.png"         # the picture on the LiveArea's start button, 280x158
 dir = "MyGame-1.0-pc/game"        # the PC release's game/ directory
 renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs vita_story.py)
-# story_renpy = "OtherGame-pc"    # for a game made with Ren'Py 7 or older (Python 2): any
-                                  # Ren'Py 8 desktop build to run vita_story.py; without
-                                  # it the story split is skipped
+# story_renpy = "OtherGame-pc"    # a Ren'Py 8 desktop build to run vita_story.py instead of
+                                  # the game's own (a game made with Ren'Py 7 or older gets
+                                  # the official SDK, downloaded once, without this)
 # The loading screen: the game's presplash images, else these two (the
 # foreground is revealed left to right as loading goes on), else the LiveArea
 # background art (or the game's menu art) with a progress bar.

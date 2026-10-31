@@ -30,26 +30,41 @@ the boot part: they run at init either way, and as story flow they do nothing
 (Init.execute only moves on). Files where nothing moves are left out of the
 output (the original .rpyc is used).
 
-The splitting runs under the game's own desktop Ren'Py Python (it needs
-Ren'Py's classes), which this script starts itself. It needs Ren'Py 8
-(Python 3): for an older game, --renpy can name any Ren'Py 8 desktop build
-(Ren'Py 8 reads older compiled scripts); with only an older Ren'Py, the split
-is skipped and the game's scripts load at startup as usual.
+The splitting loads the compiled scripts as real Ren'Py objects and writes
+them back for the Vita's Ren'Py 8, so it runs inside a desktop Ren'Py 8 on
+this computer (the port's own Ren'Py is built for the Vita only), which this
+script starts itself: the game's own (--renpy, the PC release). A game made
+with Ren'Py 7 or older (Python 2) can't be split by its own Ren'Py, so the
+official Ren'Py SDK (SDK_VERSION below, the version the port is based on) is
+downloaded once (~140 MB, checked against its published SHA-256) into
+--cache and used instead; Ren'Py 8 reads older
+compiled scripts. --no-sdk skips the split for such games instead (the
+scripts then load at startup as usual).
 
   uv run vita_story.py --renpy MyGame-1.0-pc [--src build/extract/game] [--out build/story/game]
+      [--cache build/cache] [--no-sdk]
 """
 
 import argparse
+import hashlib
 import marshal
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import zlib
 from pathlib import Path
 
-from vita_common import script_texts
+from vita_common import download, script_texts
+
+# The official SDK used for games whose own Ren'Py is older than 8: the
+# version the port's renpy-8 is based on (keep them in step).
+SDK_VERSION = "8.3.3"
+SDK_URL = f"https://www.renpy.org/dl/{SDK_VERSION}/renpy-{SDK_VERSION}-sdk.tar.bz2"
+SDK_SHA256 = "eab75c79b72bd719719dc0e55cd9e06b0737a235ff87cd6169ed940b1250e7dd"  # from its checksums.txt
 
 INDEX_NAME = "vita_story_index.bin"
 STORY_DIR = "vita_story"
@@ -195,6 +210,65 @@ def find_cds_with_init(game_dir):
     return names
 
 
+def host_python(renpy_base):
+    """The Ren'Py 8 Python in a desktop build for this computer, or None."""
+    machine = platform.machine().lower()
+    machine = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
+    if sys.platform.startswith("linux"):
+        candidates = [f"lib/py3-linux-{machine}/python"]
+    elif sys.platform == "darwin":
+        candidates = ["lib/py3-mac-universal/python", f"lib/py3-mac-{machine}/python"]
+    else:
+        candidates = [f"lib/py3-windows-{machine}/python.exe"]
+    for c in candidates:
+        if (renpy_base / c).is_file():
+            return renpy_base / c
+    return None
+
+
+def renpy_sdk(cache):
+    """The official Ren'Py SDK_VERSION SDK, downloaded and unpacked into cache
+    the first time."""
+    dest = cache / f"renpy-{SDK_VERSION}-sdk"
+    if host_python(dest) is not None and (dest / "renpy").is_dir():
+        return dest
+    cache.mkdir(parents=True, exist_ok=True)
+    archive = cache / f"renpy-{SDK_VERSION}-sdk.tar.bz2"
+    if not archive.exists():
+        print(f"downloading {SDK_URL}", flush=True)
+        download(SDK_URL, archive)
+    h = hashlib.sha256()
+    with open(archive, "rb") as f:
+        while block := f.read(1 << 20):
+            h.update(block)
+    if h.hexdigest() != SDK_SHA256:
+        sys.exit(f"{archive}: SHA-256 {h.hexdigest()}, expected {SDK_SHA256} (delete it to download again)")
+    print(f"unpacking {archive.name}", flush=True)
+    tmp = cache / f".unpack-renpy-{SDK_VERSION}-sdk"
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    tmp.mkdir()
+    with tarfile.open(archive) as tar:
+        if hasattr(tarfile, "data_filter"):
+            tar.extractall(tmp, filter="data")
+        else:
+            # Pythons before 3.11.4: refuse paths and links that leave tmp.
+            for m in tar.getmembers():
+                targets = [m.name] + ([m.linkname] if m.issym() or m.islnk() else [])
+                for target in targets:
+                    if target.startswith("/") or ".." in Path(target).parts:
+                        sys.exit(f"{archive}: unsafe path {target!r}")
+            tar.extractall(tmp)
+    (top,) = tmp.iterdir()
+    if dest.exists():
+        shutil.rmtree(dest)
+    top.rename(dest)
+    tmp.rmdir()
+    if host_python(dest) is None:
+        sys.exit(f"the Ren'Py {SDK_VERSION} SDK has no Python for this computer ({sys.platform} {platform.machine()})")
+    return dest
+
+
 def main(argv):
     if argv and argv[0] == "--worker":
         renpy_base, src, out = argv[1:4]
@@ -206,27 +280,36 @@ def main(argv):
                     help="desktop build of the game (has renpy/ and lib/)")
     ap.add_argument("--src", type=Path, default=Path("build/extract/game"), help="game/ with the .rpyc files")
     ap.add_argument("--out", type=Path, default=Path("build/story/game"))
+    ap.add_argument("--cache", type=Path, default=Path("build/cache"),
+                    help="where the Ren'Py SDK goes for games made with Ren'Py 7 or older")
+    ap.add_argument("--no-sdk", action="store_true",
+                    help="for such games, skip the split instead of downloading the SDK")
     args = ap.parse_args(argv)
 
-    pythons = sorted(args.renpy.glob("lib/py3-*/python"))
+    if not (args.renpy / "renpy").is_dir():
+        sys.exit(f"{args.renpy} isn't a Ren'Py desktop build (no renpy/ folder)")
 
     if args.out.exists():
         shutil.rmtree(args.out)
     args.out.mkdir(parents=True)
 
-    if not pythons:
-        if not (args.renpy / "renpy").is_dir():
-            sys.exit(f"{args.renpy} isn't a Ren'Py desktop build (no renpy/ folder)")
-        print(f"{args.renpy} has no Ren'Py 8 (Python 3) to split the scripts with: skipping the split, "
-              "so the scripts load at startup. Set story_renpy to a Ren'Py 8 desktop build to split them.")
-        return 0
+    renpy_base = args.renpy
+    python = host_python(renpy_base)
+    if python is None:
+        if args.no_sdk:
+            print(f"{args.renpy} has no Ren'Py 8 for this computer: skipping the split (--no-sdk), "
+                  "so the scripts load at startup.")
+            return 0
+        print(f"{args.renpy} has no Ren'Py 8 for this computer: using the Ren'Py {SDK_VERSION} SDK")
+        renpy_base = renpy_sdk(args.cache)
+        python = host_python(renpy_base)
 
     cds = find_cds_with_init(args.src)
     if cds:
         print(f"statements with execute_init (kept at boot): {sorted(cds)}")
 
-    cmd = [str(pythons[0]), os.path.abspath(__file__), "--worker",
-           str(args.renpy.resolve()), str(args.src.resolve()), str(args.out.resolve()), *sorted(cds)]
+    cmd = [str(python), os.path.abspath(__file__), "--worker",
+           str(renpy_base.resolve()), str(args.src.resolve()), str(args.out.resolve()), *sorted(cds)]
     return subprocess.run(cmd).returncode
 
 
