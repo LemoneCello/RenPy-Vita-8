@@ -23,7 +23,8 @@ order, so fallthrough between labels keeps working.
 
 Boot-relevant: anything with init code (get_init), except user statements
 whose registration has no execute_init; early_execute, except plain Python in
-the default store; translation blocks. `init` blocks written directly in a
+the default store; translation blocks, except dialogue in the original
+language (Translate with language None, as Ren'Py 6.99 compiled every line). `init` blocks written directly in a
 label's block (e.g. `default x = 1` indented under a label) are lifted into
 the boot part: they run at init either way, and as story flow they do nothing
 (Init.execute only moves on). Files where nothing moves are left out of the
@@ -73,10 +74,23 @@ def worker(renpy_base, src, out, cds_with_init):
 
     def boot_relevant(node):
         if isinstance(node, translate_types):
+            # A dialogue line in the original language: Ren'Py 6.99 compiled
+            # each into a Translate block (language None), Ren'Py 8 into a
+            # TranslateSay; the translator takes either when a story part
+            # loads. Translations into other languages are needed at boot.
+            if type(node) is ast.Translate and node.language is None:
+                return False
             return True
         if node.get_init is not None:
             if isinstance(node, ast.UserStatement):
-                name = " ".join(node.parsed[0]) if isinstance(node.parsed[0], (tuple, list)) else node.parsed[0]
+                if node.parsed is not None:
+                    name = " ".join(node.parsed[0]) if isinstance(node.parsed[0], (tuple, list)) else node.parsed[0]
+                else:
+                    # Scripts compiled by older Ren'Py (6.99) store only the
+                    # line; Ren'Py parses it later. The name starts it.
+                    words = node.line.split()
+                    name = next((" ".join(words[:n]) for n in range(len(words), 0, -1)
+                                 if " ".join(words[:n]) in cds_with_init), None)
                 if name in cds_with_init:
                     return True
             elif node.get_init():
