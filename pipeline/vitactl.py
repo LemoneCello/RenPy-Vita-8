@@ -633,8 +633,8 @@ def main(argv):
             if not usb:
                 register(title)
             elif not is_registered(MountedCard(usb, "ux0:"), title):
-                print(f"{title} isn't registered yet, so it has no bubble. After leaving USB mode,\n"
-                      f"register it over Wi-Fi: vitactl.py register {title}")
+                print(f"{title} isn't registered yet, so it has no bubble. After leaving USB mode, run\n"
+                      f"VitaShell's \"Refresh LiveArea\", or register it over Wi-Fi: vitactl.py register {title}")
     elif op == "register":
         register(args[0] if args else title_id())
     elif op == "ls":

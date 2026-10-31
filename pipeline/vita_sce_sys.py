@@ -19,8 +19,8 @@ app only shows after the LiveArea database is refreshed (e.g. VitaShell's
 
 head.bin is what VitaShell writes when it installs a VPK; having it in the
 build means an app folder copied onto the Vita can be registered as it is
-(`vitactl.py register`, or VitaShell's "Refresh LiveArea", which doesn't make
-one and so can't register a folder without it).
+(`vitactl.py register`, or VitaShell's "Refresh LiveArea", which works with
+it but doesn't make one).
 """
 
 import argparse

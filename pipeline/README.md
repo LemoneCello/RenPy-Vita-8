@@ -103,11 +103,9 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 
    Both keep the same record of what's on the card, so you can switch between them. After a run that wrote the VPK, `--stages deploy` (with `--usb` for USB) sends the same build without redoing anything.
 
-   A game copied onto the Vita this way also has to be registered with the system before its bubble appears, as installing a VPK would do. A Wi-Fi deploy does that by itself the first time; it takes a few seconds. After a first USB copy, leave USB mode and register it over Wi-Fi:
-
-   ```
-   uv run RenPy-Vita-8/pipeline/vitactl.py register TITLEID
-   ```
+   A game copied onto the Vita this way also has to be registered with the system before its bubble appears, as installing a VPK would do. A Wi-Fi deploy does that by itself the first time; it takes a few seconds. After a first USB copy, leave USB mode and either:
+   - run VitaShell's "Refresh LiveArea", which needs no network, or
+   - register it over Wi-Fi: `uv run RenPy-Vita-8/pipeline/vitactl.py register TITLEID`.
 
 5. **Removing a game from the Vita** (optional):
 
