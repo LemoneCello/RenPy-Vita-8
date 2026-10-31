@@ -43,6 +43,10 @@ Settings file (TOML):
                            # for games made with Ren'Py 7 or older (Python 2)
   base_extra = ["NAME"]    # optional: files or folders of the PC release to copy next
                            # to game/ (those the scripts name are found by themselves)
+  presplash_background = "path"  # optional, with presplash_foreground: the loading screen
+  presplash_foreground = "path"  # (foreground revealed as loading goes on), instead of the
+                           # game's; a game without one gets its LiveArea background
+                           # art (or menu art) with a progress bar
   screen_variants = "..."  # optional: Ren'Py screen variants instead of the port's
                            # "vita small phone touch mobile", e.g. "vita large pc" for a
                            # game whose phone layout doesn't fit its GUI
@@ -105,6 +109,15 @@ def plan(cfg, variant, vpk, usb=None):
         selection = [f"--include={p}" for p in sl.get("include", [])]
         selection += [f"--referenced-by={s}" for s in sl.get("referenced_by", [])]
 
+    presplash = []
+    if ("presplash_background" in game) != ("presplash_foreground" in game):
+        sys.exit("presplash_background and presplash_foreground go together")
+    if "presplash_background" in game:
+        presplash += ["--background", game["presplash_background"], "--foreground", game["presplash_foreground"]]
+    art = game.get("art_background", game.get("art"))
+    if art:
+        presplash += ["--art", art]
+
     sce_sys = ["--game", d["extract"], "--title-id", title_id, "--out", d["sce_sys"]]
     if "title" in game:
         sce_sys += ["--title", game["title"]]
@@ -128,7 +141,7 @@ def plan(cfg, variant, vpk, usb=None):
         "video": ["vita_video.py", "--src", d["videos"], "--dest", d["video"], "--scripts", d["extract"]],
         "images": ["vita_images.py", "--src", d["extract"], "--dest", d["images"]],
         "fonts": ["vita_fonts.py", "--src", d["extract"], "--dest", d["fonts"]],
-        "presplash": ["vita_presplash_build.py", d["extract"], d["presplash"]],
+        "presplash": ["vita_presplash_build.py", d["extract"], d["presplash"]] + presplash,
         "sce_sys": ["vita_sce_sys.py"] + sce_sys,
         "story": ["vita_story.py", "--renpy", game.get("story_renpy", game["renpy"]),
                   "--src", d["extract"], "--out", d["story"]],

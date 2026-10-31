@@ -20,6 +20,11 @@ renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs vita_story.p
 # story_renpy = "OtherGame-pc"    # for a game made with Ren'Py 7 or older (Python 2): any
                                   # Ren'Py 8 desktop build to run vita_story.py; without
                                   # it the story split is skipped
+# The loading screen: the game's presplash images, else these two (the
+# foreground is revealed left to right as loading goes on), else the LiveArea
+# background art (or the game's menu art) with a progress bar.
+# presplash_background = "loading.png"
+# presplash_foreground = "loading_full.png"
 # screen_variants = "vita large pc"  # Ren'Py's layout variants; default "vita small phone touch
                                   # mobile" (the phone layout). For a game whose phone layout
                                   # doesn't fit its own GUI (text outside its text box...)
