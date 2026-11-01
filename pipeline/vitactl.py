@@ -36,6 +36,7 @@ in the workspace (the current directory). VITA_VIDEO sets the capture device.
 
 import ftplib
 import hashlib
+import io
 import json
 import os
 import re
@@ -176,8 +177,10 @@ def frame(out_dir=DEFAULT_SHOT_DIR, count="1", fps="1"):
     return sorted(out_dir.glob(f"uvc-{stamp}-*.png"))
 
 
-def walk_remote(f, path, rel=""):
-    """Yields (relative path, size) for every file under a remote directory."""
+def walk_remote(f, path, rel="", times=False):
+    """Yields (relative path, size) for every file under a remote directory;
+    with times, (relative path, (size, listed time)), the time as
+    list_time() returns it."""
     for line in listing(f, path):
         parts = line.split(None, 8)
         if len(parts) < 9 or parts[8] in (".", ".."):
@@ -186,9 +189,62 @@ def walk_remote(f, path, rel=""):
         child = f"{path}/{name}"
         child_rel = f"{rel}{name}"
         if line.startswith("d"):
-            yield from walk_remote(f, child, child_rel + "/")
+            yield from walk_remote(f, child, child_rel + "/", times)
+        elif times:
+            yield child_rel, (int(parts[4]), list_time(parts[5:8]))
         else:
             yield child_rel, int(parts[4])
+
+
+MONTHS = {m: i for i, m in enumerate("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(), 1)}
+
+
+def list_time(fields):
+    """A LIST line's time ("Nov", "1", "14:02", or "2026" for the time of
+    day of an older file) as (month, day, hour, minute, year or None), in
+    the Vita's own clock; None if it can't be read."""
+    try:
+        month, day, last = MONTHS[fields[0]], int(fields[1]), fields[2]
+        if ":" in last:
+            hour, minute = (int(x) for x in last.split(":"))
+            return (month, day, hour, minute, None)
+        return (month, day, 0, 0, int(last))
+    except (KeyError, ValueError, IndexError):
+        return None
+
+
+class VitaClock:
+    """Turns listed times (the Vita's local clock, no time zone, to the
+    minute) into seconds since the epoch, from one known moment: a file
+    written just now and its listed time."""
+
+    def __init__(self, listed_now, now):
+        import calendar
+        self.calendar = calendar
+        self.year = time.gmtime(now).tm_year
+        naive = self.naive(listed_now, self.year)
+        # The Vita's clock (local time, set by hand: any offset) against
+        # this computer's; the listing is to the minute, so this is up to a
+        # minute early, which the callers' slack covers.
+        self.offset = naive - now
+        self.today = naive
+
+    def naive(self, t, year):
+        month, day, hour, minute, _ = t
+        return self.calendar.timegm((year, month, day, hour, minute, 0))
+
+    def epoch(self, t):
+        if t is None:
+            return None
+        year = t[4]
+        if year is None:
+            # Recent files are listed without the year: this year's, unless
+            # that would be in the future.
+            year = self.year
+            if self.naive(t, year) > self.today + 86400:
+                year -= 1
+        # Listed to the minute: the start of it.
+        return self.naive(t, year) - self.offset
 
 
 def file_hash(path):
@@ -214,11 +270,34 @@ class FtpCard:
         self.f.close()
 
     def files(self):
-        """{relative path: size} of everything under the destination."""
+        """{relative path: (size, modification time, time as listed)} of
+        everything under the destination; times in seconds since the epoch,
+        or None if unknown. The listed time is the Vita's own, to the minute:
+        it tells whether a file was rewritten since an earlier listing."""
+        clock = self.clock()
         try:
-            return dict(walk_remote(self.f, self.dir))
+            found = dict(walk_remote(self.f, self.dir, times=True))
         except ftplib.error_perm:
             return {}   # the destination doesn't exist yet (a first deploy)
+        return {rel: (size, clock.epoch(t) if clock else None, repr(t)) for rel, (size, t) in found.items()}
+
+    PROBE = "ux0:data/vitactl_clock_probe"
+
+    def clock(self):
+        """Reads the Vita's clock: writes an empty file and lists it."""
+        try:
+            self.f.storbinary(f"STOR {remote(self.PROBE)}", io.BytesIO(b""))
+            now = time.time()
+            folder, _, name = self.PROBE.rpartition("/")
+            listed = None
+            for line in listing(self.f, folder):
+                parts = line.split(None, 8)
+                if len(parts) == 9 and parts[8] == name:
+                    listed = list_time(parts[5:8])
+            self.f.delete(remote(self.PROBE))
+        except ftplib.all_errors:
+            return None
+        return VitaClock(listed, now) if listed else None
 
     def makedirs(self, rel_dir):
         device, _, folder = f"{self.dir}/{rel_dir}".partition(":")
@@ -290,9 +369,25 @@ class MountedCard:
         pass
 
     def files(self):
+        """{relative path: (size, modification time, time as listed)}: times
+        corrected for a card mounted with the Vita's local time (FAT keeps no
+        time zone)."""
         if not self.dir.is_dir():
             return {}
-        return {p.relative_to(self.dir).as_posix(): p.stat().st_size for p in self.dir.rglob("*") if p.is_file()}
+        probe = self.dir.parent / "vitactl_clock_probe"
+        try:
+            probe.write_bytes(b"")
+            os.sync()
+            offset = probe.stat().st_mtime - time.time()
+            probe.unlink()
+        except OSError:
+            offset = 0
+        rv = {}
+        for p in self.dir.rglob("*"):
+            if p.is_file():
+                st = p.stat()
+                rv[p.relative_to(self.dir).as_posix()] = (st.st_size, st.st_mtime - offset, str(st.st_mtime_ns))
+        return rv
 
     def makedirs(self, rel_dir):
         (self.dir / rel_dir).mkdir(parents=True, exist_ok=True)
@@ -349,8 +444,10 @@ class MountedCard:
 def sync(local_dir, remote_dir, dry_run=False, prune=False, usb=None):
     """
     Uploads files under local_dir that are missing on the Vita, differ in size,
-    or changed since the last sync (hashes of uploaded files are kept in
-    build/deploy/). With prune, deletes files an earlier sync uploaded (they're
+    changed here since the last sync (hashes of uploaded files are kept in
+    build/deploy/), rewritten on the Vita since (their listed time changed,
+    say by a deploy from elsewhere), or that this record doesn't know and
+    that are newer here than on the Vita. With prune, deletes files an earlier sync uploaded (they're
     in the manifest) that the build no longer has; anything else that exists
     only on the Vita (logs, saves, compiled scripts, backups) is never touched.
 
@@ -360,7 +457,18 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False, usb=None):
     """
     local_dir = Path(local_dir)
     manifest_path = Path("build/deploy") / (remote_dir.replace(":", "_").replace("/", "_") + ".json")
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    record = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    if isinstance(record.get("files"), dict):
+        manifest, listed = record["files"], record.get("listed", {})
+    else:
+        manifest, listed = record, {}   # the older format: hashes only
+
+    # Modification times on the Vita are to the minute, from its own clock.
+    slack = 120
+
+    def save_manifest():
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps({"files": manifest, "listed": listed}, indent=0, sort_keys=True))
 
     local = {p.relative_to(local_dir).as_posix(): p for p in sorted(local_dir.rglob("*")) if p.is_file()}
 
@@ -370,16 +478,23 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False, usb=None):
 
     uploads = []
     for rel, path in local.items():
-        size = path.stat().st_size
+        st = path.stat()
         digest = file_hash(path)
         if rel not in on_vita:
             uploads.append((rel, path, digest, "new"))
-        elif on_vita[rel] != size:
+            continue
+        size, mtime, as_listed = on_vita[rel]
+        if size != st.st_size:
             uploads.append((rel, path, digest, "size differs"))
         elif rel in manifest and manifest[rel] != digest:
             uploads.append((rel, path, digest, "changed"))
+        elif rel in manifest and rel in listed and listed[rel] != as_listed:
+            uploads.append((rel, path, digest, "changed on the Vita"))
+        elif rel not in manifest and (mtime is None or st.st_mtime > mtime + slack):
+            uploads.append((rel, path, digest, "newer here"))
         else:
-            # Same size and nothing recorded otherwise: assume it matches.
+            # Same size, and the Vita's copy is the recorded one or newer
+            # than this one: take it as matching.
             manifest[rel] = digest
 
     extra = sorted(set(on_vita) - set(local))
@@ -404,8 +519,7 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False, usb=None):
             card.makedirs(PurePosixPath(rel).parent.as_posix())
             card.put(rel, path, lambda n, rel=rel: bar.advance(n, current=rel))
             manifest[rel] = digest
-            manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            manifest_path.write_text(json.dumps(manifest, indent=0, sort_keys=True))
+            save_manifest()
 
         for rel in deletes:
             card.delete(rel)
@@ -418,8 +532,14 @@ def sync(local_dir, remote_dir, dry_run=False, prune=False, usb=None):
                 card.rmdir(d)
 
     card.done()
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps(manifest, indent=0, sort_keys=True))
+    # The Vita's times for what's there now, to notice later rewrites.
+    if uploads or deletes:
+        with card:
+            now_listed = card.files()
+    else:
+        now_listed = on_vita
+    listed = {rel: now_listed[rel][2] for rel in local if rel in now_listed and rel in manifest}
+    save_manifest()
 
 
 def uninstall(title, saves=None, usb=None, yes=False):

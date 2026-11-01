@@ -118,7 +118,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 
    - **With a card reader:** if the Vita uses a microSD card (an SD2Vita adapter), turn the Vita off, put the card in the computer's card reader, mount it, and pass its mount point with `--usb` as above. This is much faster than either: about 70–80 MB/s with the card and reader we tried (it depends on both), so a 3 GB game takes under a minute. Eject the card before putting it back in the Vita.
 
-   All three keep the same record of what's on the card, so you can switch between them. After a run that wrote the VPK, `--stages deploy` (with `--usb` for USB or a card reader) sends the same build without redoing anything.
+   All three keep the same record of what's on the card, so you can switch between them. A file is sent when it's missing on the Vita, its size differs, its content changed since the last deploy, or the Vita's copy was rewritten since (say by a deploy from another computer). For a file the record doesn't know yet, the same size is only trusted when the Vita's copy is at least as new as the local one. After a run that wrote the VPK, `--stages deploy` (with `--usb` for USB or a card reader) sends the same build without redoing anything.
 
    A game copied onto the Vita this way also has to be registered with the system before its bubble appears, as installing a VPK would do. A Wi-Fi deploy does that by itself the first time; it takes a few seconds. After a first copy over USB or with a card reader, once the card is back in use by the Vita, either:
    - run VitaShell's "Refresh LiveArea", which needs no network, or
