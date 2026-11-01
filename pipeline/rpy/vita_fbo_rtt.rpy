@@ -173,7 +173,10 @@ init -1500 python:
                         return t
 
             atlas = state["atlas"]
-            if atlas is not None and width <= cell - 4 and height <= cell - 4 and state["free_refs"] and not state["skip_atlas"]:
+            # Not 1x1: GLDraw.is_pixel_opaque (focus_mask hit tests) reads its
+            # pixel back with glReadPixels, which from the atlas framebuffer took
+            # ~430 ms per touch on the Vita (Eternum's menus); from the screen it's quick.
+            if atlas is not None and width <= cell - 4 and height <= cell - 4 and (width, height) != (1, 1) and state["free_refs"] and not state["skip_atlas"]:
                 i = 0
                 for c in cells:
                     if refs(c) <= state["free_refs"]:
