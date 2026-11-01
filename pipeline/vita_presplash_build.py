@@ -13,8 +13,9 @@ Uses, in order:
   1. --background IMG --foreground IMG: a pair chosen in the settings
      (presplash_background, presplash_foreground), the foreground revealed
      left to right as loading goes on, as in Ren'Py.
-  2. game/presplash.* or game/presplash_background.* + presplash_foreground.*,
-     like Ren'Py.
+  2. game/presplash.*, centred on a black screen with a progress bar added
+     (an empty bar on the background, a full one on the foreground); else
+     game/presplash_background.* + presplash_foreground.*, like Ren'Py.
   3. For a game without a presplash: --art IMG (the LiveArea background art
      from the settings), else the game's gui/main_menu or gui/game_menu art,
      made into a pair: the art filling the screen with an empty progress bar
@@ -123,11 +124,11 @@ def cover(src, size):
     return image.crop((left, top, left + size[0], top + size[1]))
 
 
-def with_bar(image, filled):
+def with_bar(image, filled, bottom=BAR_BOTTOM):
     """image with the progress bar's track, and its fill if filled."""
     s = image.width / 960
     x0, x1 = round(BAR_MARGIN * s), image.width - round(BAR_MARGIN * s)
-    y1 = image.height - round(BAR_BOTTOM * s)
+    y1 = image.height - round(bottom * s)
     y0 = y1 - max(2, round(BAR_HEIGHT * s))
     b = max(1, round(BAR_BORDER * s))
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -138,13 +139,21 @@ def with_bar(image, filled):
     return Image.alpha_composite(image, overlay)
 
 
-def from_art(art, out_dir, size):
-    """A background/foreground pair from one picture, with a progress bar."""
-    image = cover(art, size)
+def write_pair(image, src, out_dir, bottom=BAR_BOTTOM):
+    """A background/foreground pair from one screen-sized picture, with a progress bar."""
     out_dir.mkdir(parents=True, exist_ok=True)
     for filled, name in ((False, "vita_presplash_background.bin"), (True, "vita_presplash_foreground.bin")):
-        n = write_bin(with_bar(image, filled), out_dir / name)
-        print(f"{art.name} -> {name} {size[0]}x{size[1]} with a progress bar, {n // 1024} KiB")
+        n = write_bin(with_bar(image, filled, bottom), out_dir / name)
+        print(f"{src.name} -> {name} {image.width}x{image.height} with a progress bar, {n // 1024} KiB")
+
+
+def on_screen(src, size, upscaled=None):
+    """src fitted and centred on a black screen, as the loading screen shows it."""
+    _scale, (w, h) = fit(src, size)
+    image = upscaled if upscaled is not None else Image.open(src).convert("RGBA").resize((w, h), Image.LANCZOS)
+    screen = Image.new("RGBA", size, (0, 0, 0, 255))
+    screen.alpha_composite(image, ((size[0] - w) // 2, (size[1] - h) // 2))
+    return screen
 
 
 def main(argv):
@@ -187,12 +196,20 @@ def main(argv):
         if art is None:
             print("No presplash or art to make one from; the Vita shows a black screen while loading.")
             return 0
-        from_art(art, args.out_dir, size)
+        write_pair(cover(art, size), art, args.out_dir)
         return 0
 
     upscaled = None
     if args.ai_above > 0 and any(fit(src, size)[0] > args.ai_above for src, _name in pairs):
         upscaled = ai_upscale([src for src, _name in pairs], size)
+
+    if not args.background and single:
+        # One picture, which Ren'Py shows as it is: given a progress bar too,
+        # at the screen's bottom edge, clear of text near the picture's
+        # (Hero's Harem Guild: version and "LOADING...").
+        write_pair(on_screen(single, size, upscaled[0] if upscaled else None), single, args.out_dir,
+                   bottom=BAR_BORDER + 1)
+        return 0
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     for i, (src, name) in enumerate(pairs):
