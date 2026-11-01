@@ -71,6 +71,7 @@ init -1500 python:
         import os
         import sys
         import time
+        import threading
         # Games may define a character called id (Eternum does).
         from builtins import id
 
@@ -95,6 +96,7 @@ init -1500 python:
         state = {
             # Inside texture_grid_from_drawing (an RTT is allocating).
             "rtt" : 0,
+            "rtt_thread" : None,
             # Creating the render targets.
             "creating" : False,
             # The GL generation the targets were made for.
@@ -151,7 +153,11 @@ init -1500 python:
         original_dealloc_textures = gltexture.dealloc_textures
 
         def alloc_texture(width, height):
-            if not state["rtt"]:
+            # The image preload thread allocates textures too (load_texture):
+            # only the thread drawing the RTT gets targets, cells or copies.
+            # (Once, while the targets were made, a preloaded image's
+            # allocation set their size to 183x121.)
+            if not state["rtt"] or threading.get_ident() != state["rtt_thread"]:
                 return original_alloc_texture(width, height)
 
             if state["creating"]:
@@ -218,6 +224,7 @@ init -1500 python:
 
         def texture_grid_from_drawing(*args, **kwargs):
             state["rtt"] += 1
+            state["rtt_thread"] = threading.get_ident()
             try:
                 rv = original_texture_grid_from_drawing(*args, **kwargs)
 
