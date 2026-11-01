@@ -77,7 +77,9 @@ init -1500 python:
 
             play = self._original_play
             if self.size is None and isinstance(play, str) and play in sizes:
-                self.size = tuple(sizes[play])
+                w, h = sizes[play]
+                # side_mask: picture and mask side by side, half shown.
+                self.size = (w // 2, h) if self.side_mask else (w, h)
 
         if sizes:
             Movie.__init__ = __init__
