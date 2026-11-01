@@ -10,3 +10,14 @@
 init -1500 python:
     if getattr(renpy, "vita", False):
         config.depth_size = None
+
+# The port runs the legacy renderer unless the vita_gl2 file asks for gl2, but
+# a game's `define config.gl2 = True` makes Ren'Py pick gl2 regardless (Hero's
+# Harem Guild sets it for an outline shader it doesn't use, and crashed in
+# gl2's framebuffer code when its menu movie started). Late, after the game's
+# own init code.
+init 1000000 python:
+    if getattr(renpy, "vita", False):
+        import os as _vita_os
+        if _vita_os.environ.get("RENPY_RENDERER") != "gles2":
+            config.gl2 = False
