@@ -82,7 +82,31 @@ def worker(renpy_base, src, out, cds_with_init):
     renpy.game.log = renpy.python.RollbackLog()
     import renpy.script
     import renpy.ast as ast
-    from renpy.compat.pickle import loads, dumps
+    import io
+    import renpy.compat.pickle
+    from renpy.compat.pickle import dumps
+
+    class Unpickler(renpy.compat.pickle.Unpickler):
+        # Classes defined by Ren'Py's or the game's init code (e.g. the parsed
+        # layeredimage statements' store.layeredimage.RawLayeredImage) don't
+        # exist here, as no init code runs: the split only carries their
+        # objects along, so a stand-in that pickles back under the same name
+        # will do.
+        def find_class(self, module, name):
+            try:
+                return super().find_class(module, name)
+            except (ImportError, AttributeError):
+                if module != "store" and not module.startswith("store."):
+                    raise
+            mod = sys.modules.get(module)
+            if mod is None:
+                mod = sys.modules[module] = types.ModuleType(module)
+            if not hasattr(mod, name):
+                setattr(mod, name, type(name, (), { "__module__": module, "__qualname__": name }))
+            return getattr(mod, name)
+
+    def loads(s):
+        return Unpickler(io.BytesIO(s), fix_imports=True, encoding="utf-8", errors="surrogateescape").load()
 
     translate_types = tuple(getattr(ast, n) for n in ("Translate", "TranslateBlock", "TranslateEarlyBlock",
                                                       "TranslatePython", "TranslateString") if hasattr(ast, n))
