@@ -52,11 +52,15 @@
 #    pixels a side) draw straight into a cell of one more framebuffer
 #    texture, the atlas, instead: a texture object per cell that shares the
 #    atlas's GL texture and samples its own rectangle of it (the renderer's
-#    rtt_origin moves the clear and scissor there; the viewport is set
-#    here). One atlas is one more attachment, well within the driver's
-#    limit. The gaps between cells stay transparent, so filtering at a
-#    cell's edge doesn't pick up its neighbours. A file named vita_no_atlas
-#    in the app folder turns the atlas off.
+#    rtt_origin moves the clear and scissor there; the viewport, and a
+#    scissor for callers that clear on their own, are set here). One
+#    atlas is one more attachment, well within the driver's limit. The
+#    gaps between cells stay transparent, so filtering at a cell's edge
+#    doesn't pick up its neighbours. A draw into a cell that reads from the
+#    atlas (Pixellate halving a cell into the next one) is undefined in GL
+#    and came out black: the renderer's watch_sampling notices it, and that
+#    RTT is drawn again outside the atlas. A file named vita_no_atlas in the
+#    app folder turns the atlas off.
 #
 # Active on the Vita with copy RTT; VITA_FBO_RTT_TEST=1 turns it on elsewhere
 # (desktop: config.gl2 = False, RENPY_RENDERER=gl, RENPY_GL_RTT=copy).
@@ -67,6 +71,8 @@ init -1500 python:
         import os
         import sys
         import time
+        # Games may define a character called id (Eternum does).
+        from builtins import id
 
         if not (getattr(renpy, "vita", False) or os.environ.get("VITA_FBO_RTT_TEST")):
             return
@@ -129,6 +135,10 @@ init -1500 python:
         state["cells"] = cells
         state["pending"] = None
         state["handed"] = [ ]
+        # A cell draw sampled the atlas itself (feedback), and the redo of
+        # that RTT that keeps out of the atlas.
+        state["feedback"] = False
+        state["skip_atlas"] = False
 
         # For diagnostics.
         gltexture._vita_fbo_rtt_state = state
@@ -157,7 +167,7 @@ init -1500 python:
                         return t
 
             atlas = state["atlas"]
-            if atlas is not None and width <= cell - 4 and height <= cell - 4 and state["free_refs"]:
+            if atlas is not None and width <= cell - 4 and height <= cell - 4 and state["free_refs"] and not state["skip_atlas"]:
                 i = 0
                 for c in cells:
                     if refs(c) <= state["free_refs"]:
@@ -210,11 +220,27 @@ init -1500 python:
             state["rtt"] += 1
             try:
                 rv = original_texture_grid_from_drawing(*args, **kwargs)
+
+                # The drawing read from the atlas while drawing into it
+                # (GLDraw.get_half halving a cell, behind Pixellate): the
+                # result is undefined, so draw it again outside the atlas.
+                # The cells it got are free again once rv is dropped.
+                if state["feedback"]:
+                    state["feedback"] = False
+                    state["handed"] = [ ]
+                    state["pending"] = None
+                    rv = None
+                    state["skip_atlas"] = True
+                    try:
+                        rv = original_texture_grid_from_drawing(*args, **kwargs)
+                    finally:
+                        state["skip_atlas"] = False
             finally:
                 state["rtt"] -= 1
                 handed = state["handed"]
                 state["handed"] = [ ]
                 state["pending"] = None
+                state["feedback"] = False
 
             # render_to set each texture to sample all of a texture of its
             # size; a cell samples its rectangle of the atlas instead.
@@ -313,11 +339,21 @@ init -1500 python:
 
                     def draw_func(dx, dy, dw, dh):
                         gl.glViewport(ox, oy, dw, dh)
+                        # Callers that clear before setting their clip
+                        # (GLDraw.get_half, behind Pixellate) would wipe
+                        # the whole atlas, the cell they halve included:
+                        # keep that clear inside the cell. clip_mode_rtt
+                        # turns the scissor off again before drawing.
+                        gl.glEnable(gl.GL_SCISSOR_TEST)
+                        gl.glScissor(ox, oy, dw, dh)
                         draw.rtt_origin = origin
+                        gltexture.watch_sampling(atlas.number)
                         try:
                             inner_draw(dx, dy, dw, dh)
                         finally:
                             draw.rtt_origin = (0, 0)
+                            if gltexture.watch_sampling(0):
+                                state["feedback"] = True
 
                 if state["creating"]:
                     state["numbers"].add(texture)
@@ -433,8 +469,8 @@ init -1500 python:
                 log("no atlas: vita_no_atlas is present")
                 return
 
-            if not hasattr(renpy.display.draw, "rtt_origin"):
-                log("no atlas: the renderer has no rtt_origin")
+            if not hasattr(renpy.display.draw, "rtt_origin") or not hasattr(gltexture, "watch_sampling"):
+                log("no atlas: the renderer has no rtt_origin or watch_sampling")
                 return
 
             aw, ah = atlas_size
