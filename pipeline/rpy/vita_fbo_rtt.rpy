@@ -45,12 +45,25 @@
 #    Vita's GPU. The pool grows to max_copies; textures unused for
 #    copy_idle seconds are freed at the next interaction.
 #
+# 5. Atlas. Each copy costs ~30-60 ms on the Vita whatever its size (the CPU
+#    waits for the GPU to finish the frame so far), so even a few small
+#    RTTs a frame hold the frame rate down (those four masks at a quarter
+#    of the size, ~4 copies a frame: ~4 fps). Small RTTs (up to cell - 4
+#    pixels a side) draw straight into a cell of one more framebuffer
+#    texture, the atlas, instead: a texture object per cell that shares the
+#    atlas's GL texture and samples its own rectangle of it (the renderer's
+#    rtt_origin moves the clear and scissor there; the viewport is set
+#    here). One atlas is one more attachment, well within the driver's
+#    limit. The gaps between cells stay transparent, so filtering at a
+#    cell's edge doesn't pick up its neighbours. A file named vita_no_atlas
+#    in the app folder turns the atlas off.
+#
 # Active on the Vita with copy RTT; VITA_FBO_RTT_TEST=1 turns it on elsewhere
 # (desktop: config.gl2 = False, RENPY_RENDERER=gl, RENPY_GL_RTT=copy).
 
 init -1500 python:
 
-    def _vita_install_fbo_rtt(count, max_copies=24, copy_idle=10.0):
+    def _vita_install_fbo_rtt(count, max_copies=24, copy_idle=10.0, atlas_size=(2048, 1024), cell=256):
         import os
         import sys
         import time
@@ -104,6 +117,19 @@ init -1500 python:
         copy_used = { }
         state["copies"] = copies
 
+        # The atlas (see 5 above): its texture, the texture objects for its
+        # cells (free on the same terms as the targets), each cell's origin,
+        # the origin of the cell just handed out (for DirectRtt.render), and
+        # the cells handed out during the current texture_grid_from_drawing.
+        cells = [ ]
+        cell_origin = { }
+        cols = atlas_size[0] // cell
+        cell_count = cols * (atlas_size[1] // cell)
+        state["atlas"] = None
+        state["cells"] = cells
+        state["pending"] = None
+        state["handed"] = [ ]
+
         # For diagnostics.
         gltexture._vita_fbo_rtt_state = state
 
@@ -130,6 +156,21 @@ init -1500 python:
                     if refs(t) <= state["free_refs"] and t.number in state["numbers"] and t.generation == gltexture.generation:
                         return t
 
+            atlas = state["atlas"]
+            if atlas is not None and width <= cell - 4 and height <= cell - 4 and state["free_refs"]:
+                i = 0
+                for c in cells:
+                    if refs(c) <= state["free_refs"]:
+                        return hand_out(c, i, width, height)
+                    i += 1
+
+                if len(cells) < cell_count:
+                    c = original_alloc_texture(width, height)
+                    # Ours: never handed back to Ren'Py's free lists.
+                    c.free_list = None
+                    cells.append(c)
+                    return hand_out(c, len(cells) - 1, width, height)
+
             if state["free_refs"]:
                 for t in copies:
                     if t.width == width and t.height == height and refs(t) <= state["free_refs"] and t.generation == gltexture.generation:
@@ -146,14 +187,57 @@ init -1500 python:
 
             return original_alloc_texture(width, height)
 
+        def hand_out(c, i, width, height):
+            """Points cell object c (cell i) at the atlas, for an RTT of this size."""
+            atlas = state["atlas"]
+            c.width = width
+            c.height = height
+            c.number = atlas.number
+            c.generation = atlas.generation
+            # As if its storage was made for RTT already: render_to would
+            # otherwise re-create it at the cell's size, i.e. resize the atlas.
+            c.format = gl.GL_RGBA
+            # 2 pixels in from the cell's corner: the gap around each cell,
+            # and never (0, 0), which the renderer takes as "not in an atlas"
+            # (it would clear the whole texture).
+            origin = ((i % cols) * cell + 2, (i // cols) * cell + 2)
+            cell_origin[id(c)] = origin
+            state["pending"] = origin
+            state["handed"].append(c)
+            return c
+
         def texture_grid_from_drawing(*args, **kwargs):
             state["rtt"] += 1
             try:
-                return original_texture_grid_from_drawing(*args, **kwargs)
+                rv = original_texture_grid_from_drawing(*args, **kwargs)
             finally:
                 state["rtt"] -= 1
+                handed = state["handed"]
+                state["handed"] = [ ]
+                state["pending"] = None
+
+            # render_to set each texture to sample all of a texture of its
+            # size; a cell samples its rectangle of the atlas instead.
+            aw, ah = atlas_size
+            for c in handed:
+                ox, oy = cell_origin[id(c)]
+                c.xadd = 1.0 * ox / aw
+                c.yadd = 1.0 * oy / ah
+                c.xmul = 1.0 / aw
+                c.ymul = 1.0 / ah
+
+            return rv
 
         def dealloc_textures(*args, **kwargs):
+            if state["atlas"] is not None:
+                state["atlas"].deallocate()
+                state["atlas"] = None
+            # The cells share the atlas's GL texture: forget it, don't delete it.
+            for c in cells:
+                c.number = 0
+            del cells[:]
+            cell_origin.clear()
+
             for t in targets + copies:
                 t.deallocate()
             del targets[:]
@@ -201,7 +285,40 @@ init -1500 python:
 
                 return self.inner.deinit()
 
+            def clear_texture(self, texture):
+                """Clears a whole texture to transparent through the framebuffer.
+                Returns False if it can't be a framebuffer attachment."""
+                gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.fbo)
+                gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, texture, 0)
+                ok = gl.glCheckFramebufferStatus(gl.GL_FRAMEBUFFER) == gl.GL_FRAMEBUFFER_COMPLETE
+                if ok:
+                    gl.glDisable(gl.GL_SCISSOR_TEST)
+                    gl.glClearColor(0.0, 0.0, 0.0, 0.0)
+                    gl.glClear(gl.GL_COLOR_BUFFER_BIT)
+                gl.glFramebufferTexture2D(gl.GL_FRAMEBUFFER, gl.GL_COLOR_ATTACHMENT0, gl.GL_TEXTURE_2D, 0, 0)
+                gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self.root)
+                gl.glGetError()
+                return ok
+
             def render(self, environ, texture, x, y, w, h, draw_func):
+                # An atlas cell: draw into its rectangle (see 5 above).
+                origin = None
+                atlas = state["atlas"]
+                if atlas is not None and texture == atlas.number and state["pending"] is not None:
+                    origin = state["pending"]
+                    state["pending"] = None
+                    ox, oy = origin
+                    inner_draw = draw_func
+                    draw = renpy.display.draw
+
+                    def draw_func(dx, dy, dw, dh):
+                        gl.glViewport(ox, oy, dw, dh)
+                        draw.rtt_origin = origin
+                        try:
+                            inner_draw(dx, dy, dw, dh)
+                        finally:
+                            draw.rtt_origin = (0, 0)
+
                 if state["creating"]:
                     state["numbers"].add(texture)
                 elif not self.alive or texture not in state["numbers"]:
@@ -302,6 +419,44 @@ init -1500 python:
                 log("creating render targets failed: %r" % (e,))
             finally:
                 state["creating"] = False
+
+            try:
+                make_atlas(draw.rtt)
+            except Exception as e:
+                state["atlas"] = None
+                log("creating the atlas failed: %r" % (e,))
+
+        def make_atlas(rtt):
+            # A file named vita_no_atlas in the app folder turns the atlas off
+            # (for comparing with the stock copy).
+            if os.path.exists(os.path.join(config.basedir, "vita_no_atlas")):
+                log("no atlas: vita_no_atlas is present")
+                return
+
+            if not hasattr(renpy.display.draw, "rtt_origin"):
+                log("no atlas: the renderer has no rtt_origin")
+                return
+
+            aw, ah = atlas_size
+            t = original_alloc_texture(aw, ah)
+            t.free_list = None
+            t.allocate()
+            gl.glBindTexture(gl.GL_TEXTURE_2D, t.number)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MAG_FILTER, gl.GL_LINEAR)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_MIN_FILTER, gl.GL_LINEAR)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_S, gl.GL_CLAMP_TO_EDGE)
+            gl.glTexParameteri(gl.GL_TEXTURE_2D, gl.GL_TEXTURE_WRAP_T, gl.GL_CLAMP_TO_EDGE)
+            gl.glTexImage2D(gl.GL_TEXTURE_2D, 0, gl.GL_RGBA, aw, ah, 0, gl.GL_RGBA, gl.GL_UNSIGNED_BYTE, None)
+            t.format = gl.GL_RGBA
+
+            if not rtt.clear_texture(t.number):
+                t.deallocate()
+                log("no atlas: its framebuffer is incomplete")
+                return
+
+            state["numbers"].add(t.number)
+            state["atlas"] = t
+            log("atlas of %dx%d, %d cells of %d" % (aw, ah, cell_count, cell))
 
         gltexture.alloc_texture = alloc_texture
         gltexture.texture_grid_from_drawing = texture_grid_from_drawing
