@@ -235,10 +235,17 @@ def process(job):
 
     target = dest / rel
     target.parent.mkdir(parents=True, exist_ok=True)
-    if fmt == "JPEG":
-        out.save(target, "JPEG", quality=jpeg_quality, optimize=True)
+    opaque = out.mode != "RGBA" or out.getchannel("A").getextrema()[0] == 255
+    if fmt in ("JPEG", "WEBP") and opaque:
+        # Opaque art as JPEG, even under a .webp name (SDL_image goes by the
+        # content): read and decoded on the Vita, a 960x540 picture took ~64 ms
+        # as JPEG, ~155 as lossy WebP, ~270 as lossless WebP, ~220 as PNG,
+        # and background loads hand JPEGs to the hardware decoder.
+        out.convert("RGB").save(target, "JPEG", quality=jpeg_quality, optimize=True)
     elif fmt == "WEBP":
-        out.save(target, "WEBP", lossless=True)
+        # With transparency: lossy WebP (alpha kept lossless), ~150 ms
+        # against PNG's ~210 and lossless WebP's ~230.
+        out.save(target, "WEBP", quality=jpeg_quality, method=6)
     else:
         out.save(target, "PNG", optimize=True)
     return rel, "scaled", (w, h), new_size, trim
@@ -270,7 +277,7 @@ def main():
                         help="downscale factor, e.g. 2 or 4/3 (default: from the game's screen size)")
     parser.add_argument("--min-pixels", type=int, default=256 * 256,
                         help="leave images with fewer pixels than this untouched")
-    parser.add_argument("--jpeg-quality", type=int, default=90)
+    parser.add_argument("--jpeg-quality", type=int, default=90, help="also for WebP art (opaque as JPEG)")
     parser.add_argument("--trim-below", type=float, default=0.6,
                         help="crop images with alpha whose visible part covers less than this share of the image (0 turns cropping off)")
     parser.add_argument("--jobs", type=int, default=None, help="worker processes (default: CPU count)")
@@ -301,7 +308,7 @@ def main():
     # and modification time and its result. Images that haven't changed since
     # are kept; different settings start over.
     settings = {"factor": str(args.factor) if args.factor.denominator != 1 else int(args.factor), "min_pixels": args.min_pixels, "jpeg_quality": args.jpeg_quality,
-                "trim_below": args.trim_below}
+                "trim_below": args.trim_below, "webp": "jpeg if opaque, else lossy"}
     record_path = args.dest.parent / f"{args.dest.name}.images.json"
     try:
         record = json.loads(record_path.read_text())
