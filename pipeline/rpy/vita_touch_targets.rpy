@@ -10,6 +10,12 @@
 #
 # Only touches styles named quick_button / quick_button_text, so games with
 # their own quick menu styles are unaffected.
+#
+# Growing upwards keeps the text in place when the quick menu sits on the
+# screen's bottom edge (the template's yalign 1.0). A game that centres it
+# there instead (Hero's Harem Guild: ycenter .99) had its button text pushed
+# below the screen, so once a quick button shows up cut off by the screen's
+# edge, the extra height is split above and below the text instead.
 
 init 1 python:
 
@@ -31,12 +37,43 @@ init 1 python:
             left, top, right, bottom = 0, 0, 0, 0
 
         text = max(getattr(gui, "quick_button_text_size", 0) or 0, min_text)
-        top = max(top, min_height - text - bottom)
+        grow = max(0, min_height - text - bottom - top)
+        if _vita_touch_targets.split:
+            top += grow // 2
+            bottom += grow - grow // 2
+        else:
+            top += grow
 
         style.quick_button.padding = (left, top, right, bottom)
         style.quick_button_text.size = text
+        _vita_touch_targets.height = top + text + bottom
 
+    # False: not checked yet; True: split; None: upwards is fine. (A function
+    # attribute, so rollback and saves leave it alone.)
+    _vita_touch_targets.split = False
     _vita_touch_targets()
+
+    def _vita_touch_check():
+        # Once, the first time a quick button is on screen.
+        if _vita_touch_targets.split is not False or not (renpy.variant("vita") and renpy.variant("touch")):
+            return
+        for f in renpy.display.focus.focus_list:
+            st = getattr(f.widget, "style", None)
+            names = (getattr(st, "name", None) or ()) + (getattr(st, "parent", None) or ())
+            if "quick_button" not in names or f.h is None:
+                continue
+            # Focus areas are clipped to the screen: one shorter than the
+            # button's padding and text reaches past an edge.
+            if f.h < _vita_touch_targets.height - 1:
+                _vita_touch_targets.split = True
+                _vita_touch_targets()
+                renpy.style.rebuild()
+                renpy.restart_interaction()
+            else:
+                _vita_touch_targets.split = None
+            return
+
+    config.periodic_callbacks.append(_vita_touch_check)
 
     # Ren'Py restores the styles saved before init whenever it sets the
     # language (also once at startup), which drops changes made here; its
