@@ -30,7 +30,7 @@ workspace/
 
 `pipeline/container/` has a Debian image with everything the scripts need. Start it with `RenPy-Vita-8/pipeline/container/run-container.sh` from the workspace. The container sees only the workspace, mounted at `/work`, and reaches the Vita over Wi-Fi through Docker's normal network. Options:
 - `--usb MOUNT` shares the Vita's memory card (see step 4 of "Running the pipeline").
-- `--dev` is for working on the pipeline itself. It adds a bigger image (sudo, Claude Code, desktop Ren'Py test runs), the host's network and the Vita's webcam feed. The scripts use [uv](https://docs.astral.sh/uv/) (`uv run script.py`); each script declares its own dependencies.
+- `--dev` is for working on the pipeline itself. It adds a bigger image (sudo, Claude Code with [rtk](https://github.com/rtk-ai/rtk), desktop Ren'Py test runs), the host's network and the Vita's webcam feed. The scripts use [uv](https://docs.astral.sh/uv/) (`uv run script.py`); each script declares its own dependencies.
 
 ## Building the eboot
 
