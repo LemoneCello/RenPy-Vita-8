@@ -6,8 +6,9 @@
 # X.mp4 is (Movie keeps play only if the file exists, and the build doesn't
 # ship the original), and a Movie without size= gets the original movie's
 # resolution from vita_video_sizes.json (written by vita_video.py), as it
-# would otherwise be drawn at the smaller re-encoded size. Game scripts stay
-# unchanged.
+# would otherwise be drawn at the smaller re-encoded size, and
+# renpy.list_files() names each converted movie as the game does. Game scripts
+# stay unchanged.
 
 init -1500 python:
 
@@ -83,5 +84,19 @@ init -1500 python:
 
         if sizes:
             Movie.__init__ = __init__
+
+        # Games that define Movie images by scanning renpy.list_files() for
+        # their WebM files (Hero's Harem Guild: every .webm becomes an image)
+        # found none, as only the .mp4 ships: list a converted movie under the
+        # name the game knows, which plays the .mp4 as above.
+        originals = { os.path.splitext(name)[0] + ".mp4": name for name in sizes if not name.lower().endswith(".mp4") }
+
+        if originals:
+            original_list_files = renpy.exports.list_files
+
+            def list_files(common=False):
+                return [ originals.get(i, i) for i in original_list_files(common) ]
+
+            renpy.exports.list_files = list_files
 
     _vita_install_video()
