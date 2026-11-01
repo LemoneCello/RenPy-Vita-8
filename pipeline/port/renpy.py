@@ -375,14 +375,22 @@ def main():
         except Exception:
             pass
 
-    # Stop SDL's timers, so its timer thread is idle when the process
-    # ends: once it faulted in SDL_TimerThread during os._exit
-    # (C2-12828-1) when the system closed the running game.
+    # Stop SDL's timers and its timer thread before the process ends: the
+    # thread faulted in SDL_TimerThread during os._exit (C2-12828-1 and a
+    # core dump) on most quits from the game's own menu (2026-11-01).
+    # Cancelling the timers left the thread running. SDL_AddTimer starts the
+    # thread without counting a timer-subsystem initialisation, so shutting
+    # the subsystem down did nothing; initialising it once first makes the
+    # count 1, and shutting it down then (until the count reaches zero;
+    # further calls do nothing) stops the thread and waits for it.
     try:
         import pygame_sdl2.time
         core = renpy.display.core
         for event in (core.PERIODIC, core.REDRAW, core.TIMEEVENT):
             pygame_sdl2.time.set_timer(event, 0)
+        pygame_sdl2.time.init()
+        for _i in range(8):
+            pygame_sdl2.time.quit()
     except Exception:
         pass
 
