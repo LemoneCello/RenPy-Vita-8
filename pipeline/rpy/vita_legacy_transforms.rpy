@@ -24,6 +24,13 @@
 # becomes a constant offset. An animated matrixcolor is recoloured at most
 # every 0.3 s per Transform (a colour fade becomes a few steps).
 #
+# ImageDissolve (and the other im.* functions) under the legacy renderer
+# take a string as a filename, where gl2 (a Transform) also takes an image
+# name: the test game's ImageDissolve("whiteblack", ...) for the image
+# images/MENUS/whiteblack.jpg found no file, and the wipe showed black
+# with an error. A string without an extension that isn't a file is looked
+# up as an image name when first loaded.
+#
 # Under gl2 on the Vita (experimental, see vita_gl2.rpy) only `blur` is
 # dropped: gl2's blur shader blurs by sampling mipmaps, which the Vita's
 # textures don't have (gl2texture.pyx), so it showed nothing, yet each
@@ -184,5 +191,45 @@ init -1500 python:
         Transform.render = render
 
         Transform._vita_legacy_transforms = True
+
+        im = renpy.display.im
+        original_image = im.image
+
+        class NamedImage(im.ImageBase):
+            # An image name given where a filename was expected: resolved to
+            # the image's own im.Image (or other ImageBase) when needed.
+            def __init__(self, name, **properties):
+                super(NamedImage, self).__init__(name, **properties)
+                self.name = name
+
+            def target(self):
+                ref = renpy.display.image.ImageReference(tuple(self.name.split()))
+                ref.find_target()
+                return original_image(ref.target)
+
+            def load(self):
+                return im.cache.get(self.target())
+
+            def get_hash(self):
+                return self.target().get_hash()
+
+            def get_oversample(self):
+                return self.target().get_oversample()
+
+            def predict_files(self):
+                return self.target().predict_files()
+
+        # Pickled by name, like Ren'Py's own image classes (a class local to
+        # this function couldn't be saved).
+        NamedImage.__module__ = "renpy.display.im"
+        NamedImage.__name__ = NamedImage.__qualname__ = "_VitaNamedImage"
+        im._VitaNamedImage = NamedImage
+
+        def image(arg, loose=False, **properties):
+            if isinstance(arg, str) and "." not in arg and not renpy.loader.loadable(arg):
+                return NamedImage(arg, **properties)
+            return original_image(arg, loose=loose, **properties)
+
+        im.image = image
 
     _vita_install_legacy_transforms()
