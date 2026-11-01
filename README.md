@@ -1,6 +1,6 @@
 # RenPy-Vita-8: Ren'Py → PS Vita pipeline
 
-> **Work in progress.** This has been tried on two games so far, and only one of them runs from start to finish on the Vita. Expect other games to need fixes: settings, hooks, or changes to the pipeline itself. Reports of what works and what doesn't are welcome.
+> **Work in progress.** This has been tried on three games so far; two of them run from start to finish on the Vita, and the third is being tested. Expect other games to need fixes: settings, hooks, or changes to the pipeline itself. Reports of what works and what doesn't are welcome.
 
 This fork of [Grimiku's RenPy-Vita-8](https://github.com/Grimiku/RenPy-Vita-8) adds a pipeline that turns a Ren'Py game's PC release into a complete PS Vita app (a VPK), and makes the game run well on the Vita.
 
@@ -44,12 +44,13 @@ Measured on a PS Vita with one large commercial Ren'Py 8.3 game: ~140,000 script
 | **Movies** | | |
 | Formats | MP4 (H.264/AAC) only; games' WebM movies don't play | Movies converted to MP4 automatically |
 | Playback, 960×544 | 7.8 fps (each frame copied to the GPU by the CPU) | Full frame rate, 60 fps cutscenes included (decoded straight into GPU memory) |
-| `Movie` images in scenes | Never play | Play, and loop without a gap |
+| `Movie` images in scenes | Never play | Play, and loop without a gap; movies with transparency (`side_mask`) keep it |
 | Two movies at once (e.g. a dissolve between them) | One player only | Both play, 60 fps through the dissolve |
 | **Fixes** | | |
 | Audio files that start at time 0 | Game and music freeze ~20 s each time one starts (FFmpeg built with `-ffast-math`) | Fixed |
 | Quitting the game | Crash (error C2-12828-1) | Clean exit |
 | Dimming and standby during play | Blocked | Allowed (OLED screens) |
+| Still screens (menus, paused dialogue) | Redrawn 60 times a second | Drawn when something changes (about once a second on an idle menu) |
 | Shader effects (masks, colour matrices, perspective) | Drawn black or not at all | Emulated on the CPU, or drawn by the GPU with the experimental gl2 renderer |
 | D-pad navigation | Stuck on full-screen masked buttons; one press could move twice | Works |
 | Touch | Phone layout not used (tiny desktop UI) | Phone layout and larger quick-menu buttons |

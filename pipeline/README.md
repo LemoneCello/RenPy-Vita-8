@@ -1,11 +1,12 @@
 # Ren'Py → PS Vita pipeline
 
-> **Work in progress.** This has been tried on two games so far, and only one of them runs from start to finish on the Vita. Expect other games to need fixes: settings, hooks, or changes to the pipeline itself. Reports of what works and what doesn't are welcome.
+> **Work in progress.** This has been tried on three games so far; two of them run from start to finish on the Vita, and the third is being tested. Expect other games to need fixes: settings, hooks, or changes to the pipeline itself. Reports of what works and what doesn't are welcome.
 
 Turns a Ren'Py game's PC release into a PS Vita app for this port (RenPy-Vita-8, PVR build), and makes it run well. Each step is a separate script; one command runs them all. The fixes are meant to be generic. Tested on:
 
 - **Eternum 0.9.5** (Ren'Py 8.3, 1920×1080; "the test game" in older code comments and commits): about 140,000 script statements, 13,000 images and 449 movies. The figures below are for this game.
-- **Doki Doki Literature Club! 1.1.1** (Ren'Py 6.99, Python 2, 1280×720, compiled scripts only): in progress. Acts 1 and 2 play through on the Vita (boot about 18 s); act 3's animated window masks crash the Vita's GPU, which is being worked on.
+- **Doki Doki Literature Club! 1.1.1** (Ren'Py 6.99, Python 2, 1280×720, compiled scripts only): plays through to the end on the Vita (all four acts; boot about 18 s, menus at 60 fps). Act 3's animated window masks (about 20 render-to-textures a frame) needed a texture atlas for render-to-texture and a game-specific hook; that room runs at 34–40 fps.
+- **Hero's Harem Guild 0.1.2.3b** (Ren'Py 8.0.3, 1920×1080): about 100,000 script statements, 11,000 images and 1,184 movies, some with transparency (`side_mask`). Runs on the Vita (2.5 GiB VPK, boot about 60 s); checked so far up to the start of the tutorial.
 
 On the Vita, Eternum boots in about 35 s and dialogue advances in about 100 ms. Its 60 fps movies play on the Vita's hardware decoder, including two at once.
 
@@ -138,11 +139,11 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
 |---|---|---|
 | `extract` | `vita_extract.py` | Takes the files out of the game's archives. Movies go to a separate tree. |
 | `video` | `vita_video.py` | Re-encodes movies to 960×540 H.264/AAC MP4 (CRF 18), the formats the Vita decodes. Adds silent sound to movies that have none. |
-| `images` | `vita_images.py` | Shrinks every image of at least 65,536 pixels (256×256) by the factor that makes the game's screen fit the Vita's: 2 for a 1920×1080 game (full-screen images become 960×540), 4/3 for 1280×720, none for games no bigger than the Vita's screen. The game's size comes from its scripts (`gui.init(W, H)`, or `config.screen_width` and `screen_height`); `--factor` overrides it. Every large image shrinks by the same factor, so it keeps its size relative to the screen; smaller images, such as icons and frame borders, are left alone. Also crops large transparent margins. A generated hook tells Ren'Py to draw the shrunk images at their original size and pads the cropped ones back. |
+| `images` | `vita_images.py` | Shrinks every image of at least 65,536 pixels (256×256) by the factor that makes the game's screen fit the Vita's: 2 for a 1920×1080 game (full-screen images become 960×540), 4/3 for 1280×720, none for games no bigger than the Vita's screen. The game's size comes from its scripts (`gui.init(W, H)`, or `config.screen_width` and `screen_height`); `--factor` overrides it. Every large image shrinks by the same factor, so it keeps its size relative to the screen; smaller images, such as icons and frame borders, are left alone. Also crops large transparent margins. Opaque JPEG and WebP art is written as JPEG (quality 90; under the original file name, as the image loader goes by the content), transparent WebP as lossy WebP with lossless alpha, PNG stays PNG: on the Vita a 960×540 picture reads and decodes in ~64 ms as JPEG (and preloads on the hardware decoder), ~155 ms as lossy WebP, ~220 ms as PNG and ~270 ms as lossless WebP. A generated hook tells Ren'Py to draw the shrunk images at their original size and pads the cropped ones back. |
 | `fonts` | `vita_fonts.py` | Cuts fonts above 1 MB down to the characters the scripts use. |
-| `presplash` | `vita_presplash_build.py` | Prepares the loading screen: the game's presplash images, or a pair named in the settings (`presplash_background`, `presplash_foreground`; the foreground is revealed left to right as loading goes on). A game without one gets its LiveArea background art (`art_background` or `art`, else its main menu art) filling the screen, with a progress bar near the bottom. Images much smaller than the screen are enlarged with Real-ESRGAN (`vita_upscale.py`). |
+| `presplash` | `vita_presplash_build.py` | Prepares the loading screen: the game's presplash images (a single `presplash` picture gets a progress bar along the screen's bottom edge), or a pair named in the settings (`presplash_background`, `presplash_foreground`; the foreground is revealed left to right as loading goes on). A game without one gets its LiveArea background art (`art_background` or `art`, else its main menu art) filling the screen, with a progress bar near the bottom. Images much smaller than the screen are enlarged with Real-ESRGAN (`vita_upscale.py`). |
 | `sce_sys` | `vita_sce_sys.py` | Writes `param.sfo`, the bubble icon and LiveArea art, and the package header (`package/head.bin`) the system needs to register the app. The art is the game's loading screen (its `presplash` images), else its main menu art, unless the settings file names other pictures: `art` for all three places, or `art_icon` (the bubble, 128×128), `art_background` (the LiveArea, 840×500) and `art_start` (the picture on the LiveArea's start button, 280×158) for one each. Pictures are scaled and centre-cropped to those sizes, so one with the same shape works best. |
-| `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for Eternum). It loads the compiled scripts as real Ren'Py objects and writes them back, so it runs inside a desktop Ren'Py 8 on the PC (the port's own Ren'Py is built for the Vita only): the game's own, or, for a game made with Ren'Py 7 or older, the official Ren'Py 8.3.3 SDK, downloaded once (~140 MB) into `build/cache/`. |
+| `story` | `vita_story.py` | Splits the compiled scripts so episodes load when first needed (boot ~76 → 44 s for Eternum). It loads the compiled scripts as real Ren'Py objects and writes them back, so it runs inside a desktop Ren'Py 8 on the PC (the port's own Ren'Py is built for the Vita only): the game's own, or, for a game made with Ren'Py 7 or older, the official Ren'Py 8.3.3 SDK, downloaded once (~140 MB) into `build/cache/`. No game code runs there, so objects of classes that init code defines (such as parsed `layeredimage` statements) are carried through as stand-ins. |
 | `build` | `vita_build.py` | Assembles the app folder: port files, eboot, game, overlays and `rpy/` hooks (plus `rpy/py2/` for games whose scripts hold Python 2 code, made with Ren'Py 7 or older). Copies files of the PC release next to `game/` that the scripts use (`"../NAME/..."`, `config.basedir + "/NAME"`). Packs assets into archives, because loose files are slow on the Vita. Writes the VPK. |
 | `deploy` | `vitactl.py sync` | Only with `--deploy` or `--usb`, or when named in `--stages`: sends only what changed to `ux0:app/TITLE_ID`, over Wi-Fi, USB or a card reader, and registers a new game (over Wi-Fi; otherwise it says how). |
 
@@ -192,7 +193,7 @@ The engine changes are on the `vita-perf` branches of this repository and its tw
 
 | Hook | Does |
 |---|---|
-| `vita_video.rpy` | Plays the `.mp4` when the game asks for its WebM |
+| `vita_video.rpy` | Plays the `.mp4` when the game asks for its WebM, at the original movie's size (half its width for `side_mask` movies, whose mask renpy-8 applies with a shader); `renpy.list_files()` names converted movies as the game does |
 | `vita_lazy_images.rpy` | Defines the images under `images/` when first used, not at boot |
 | `vita_image_cache.rpy` | Gives the image cache a real size (the port's low-memory mode left it at 0) |
 | `vita_font_memory.rpy` | Reads each font into memory once, instead of FreeType reading the card for every glyph |
@@ -204,9 +205,10 @@ The engine changes are on the `vita-perf` branches of this repository and its tw
 | `vita_predict_menus.rpy` | Preloads the images of menus that on-screen buttons open |
 | `vita_stall_clock.rpy` | Stops animations jumping ahead after a slow frame |
 | `vita_dpad_focus.rpy` | D-pad navigation for full-screen masked buttons |
-| `vita_touch_targets.rpy` | Bigger quick-menu buttons for touch |
+| `vita_touch_targets.rpy` | Bigger quick-menu buttons for touch (growing upwards, or both ways for a quick menu centred on the screen's edge) |
 | `vita_mobile.rpy` | Lets game code see `renpy.mobile` as True, for touch layouts |
-| `vita_gl2.rpy` | Settings for the gl2 renderer |
+| `vita_gl2.rpy` | Settings for the gl2 renderer; keeps the old renderer when a game sets `config.gl2` itself |
+| `vita_discord.rpy` | Makes Discord Rich Presence (the `discord_rpc` package games ship) do nothing: the Vita has no Unix sockets |
 | `vita_pad.rpy` | Keeps the controller on (the Vita's buttons), for games that switch it off for PC players |
 | `vita_input_enter.rpy` | Games made before Ren'Py 8.3: Enter in a text input reaches the screen again (name-entry screens that accept the name on Enter) |
 | `py2/vita_py2compat.rpy` | Python 2 games only: `renpy.file()` returns text, as it did under Python 2 |
