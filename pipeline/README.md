@@ -77,6 +77,7 @@ The patches are in `patches/`. `--from STEP` redoes a step and everything after 
    # story_renpy = "OtherGame-pc"    # a Ren'Py 8 desktop build for the story stage instead of the game's own
    # presplash_background = "loading.png"      # the loading screen instead of the game's, with
    # presplash_foreground = "loading_full.png" #   the foreground revealed as loading goes on
+   # rpy_extra = ["RenPy-Vita-8/pipeline/games/mygame"]  # game-specific hooks, see "Game-specific notes"
    # screen_variants = "vita large pc"  # the desktop layout, for a game whose phone layout doesn't fit its GUI (default "vita small phone touch mobile")
    # base_extra = ["extras"]         # files or folders of the PC release to put next to game/ (ones the scripts name are found by themselves)
 
@@ -233,6 +234,7 @@ The pipeline reads everything from the game's own files and Ren'Py's rules, with
 - Fonts used for text that isn't in any script (typed names, generated text) would lose characters when subset. Keep them with `[stages.fonts] args = ["--keep", "FONT.ttf"]`.
 - Some games switch effects or layouts off for mobile variants. The port reports the Vita as `vita small phone touch mobile`. A game that kept the Ren'Py template's phone settings without fitting them to its own GUI (text drawn outside its text box, say) looks right with the desktop layout: `screen_variants = "vita large pc"`.
 - `--variant slice` needs a `[slice]` section listing the folders to include.
+- When a game needs a fix that must not apply to other games, it goes in `pipeline/games/<game>/` as `.rpy` hooks, and the game's settings add the folder with `rpy_extra`. So far: `games/ddlc/` (Doki Doki Literature Club! 1.1.1: its act 3 window masks render at the size they're shown).
 
 ## Licence
 

@@ -35,14 +35,25 @@
 # Measured on the Vita: a dissolve's first frame ~200 ms -> 22-52 ms while a
 # target is free.
 #
+# 4. Copies. RTTs beyond the free targets (and of other sizes) still use the
+#    stock copy, but into a texture of the same size kept in a pool and
+#    reused, instead of a new one each time (a copy never attaches its texture to a framebuffer, so
+#    the driver limit in 3 doesn't apply). Effects that render to texture
+#    every frame need this: four of Doki Doki Literature Club!'s animated
+#    image-dissolve masks make ~20 RTTs a frame, and creating and freeing a
+#    960x540 texture for each of the ~16 copies most likely crashed the
+#    Vita's GPU. The pool grows to max_copies; textures unused for
+#    copy_idle seconds are freed at the next interaction.
+#
 # Active on the Vita with copy RTT; VITA_FBO_RTT_TEST=1 turns it on elsewhere
 # (desktop: config.gl2 = False, RENPY_RENDERER=gl, RENPY_GL_RTT=copy).
 
 init -1500 python:
 
-    def _vita_install_fbo_rtt(count):
+    def _vita_install_fbo_rtt(count, max_copies=24, copy_idle=10.0):
         import os
         import sys
+        import time
 
         if not (getattr(renpy, "vita", False) or os.environ.get("VITA_FBO_RTT_TEST")):
             return
@@ -87,6 +98,12 @@ init -1500 python:
         targets = [ ]
         state["targets"] = targets
 
+        # Pooled textures for copy RTTs (see 4 above), with the time each was
+        # last handed out. Free on the same terms as the targets.
+        copies = [ ]
+        copy_used = { }
+        state["copies"] = copies
+
         # For diagnostics.
         gltexture._vita_fbo_rtt_state = state
 
@@ -113,6 +130,20 @@ init -1500 python:
                     if refs(t) <= state["free_refs"] and t.number in state["numbers"] and t.generation == gltexture.generation:
                         return t
 
+            if state["free_refs"]:
+                for t in copies:
+                    if t.width == width and t.height == height and refs(t) <= state["free_refs"] and t.generation == gltexture.generation:
+                        copy_used[id(t)] = time.time()
+                        return t
+
+                if len(copies) < max_copies:
+                    rv = original_alloc_texture(width, height)
+                    # Ours: never handed back to Ren'Py's free lists.
+                    rv.free_list = None
+                    copies.append(rv)
+                    copy_used[id(rv)] = time.time()
+                    return rv
+
             return original_alloc_texture(width, height)
 
         def texture_grid_from_drawing(*args, **kwargs):
@@ -123,9 +154,11 @@ init -1500 python:
                 state["rtt"] -= 1
 
         def dealloc_textures(*args, **kwargs):
-            for t in targets:
+            for t in targets + copies:
                 t.deallocate()
             del targets[:]
+            del copies[:]
+            copy_used.clear()
             state["numbers"].clear()
             state["generation"] = None
 
@@ -202,7 +235,18 @@ init -1500 python:
                     # The rejected copy into the 1x1 texture.
                     gl.glGetError()
 
+        def release_idle_copies():
+            now = time.time()
+            for t in list(copies):
+                if now - copy_used.get(id(t), 0) > copy_idle and refs(t) <= state["free_refs"] + 1:
+                    copies.remove(t)
+                    copy_used.pop(id(t), None)
+                    t.deallocate()
+
         def interact():
+            if copies:
+                release_idle_copies()
+
             draw = renpy.display.draw
             rtt = getattr(draw, "rtt", None)
 

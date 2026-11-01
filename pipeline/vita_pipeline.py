@@ -48,6 +48,8 @@ Settings file (TOML):
   presplash_foreground = "path"  # (foreground revealed as loading goes on), instead of the
                            # game's; a game without one gets its LiveArea background
                            # art (or menu art) with a progress bar
+  rpy_extra = ["path"]     # optional: folders of game-specific hooks (.rpy) to add, e.g.
+                           # "RenPy-Vita-8/pipeline/games/<game>"
   screen_variants = "..."  # optional: Ren'Py screen variants instead of the port's
                            # "vita small phone touch mobile", e.g. "vita large pc" for a
                            # game whose phone layout doesn't fit its GUI
@@ -134,6 +136,7 @@ def plan(cfg, variant, vpk, usb=None):
     build_args += [f"--base-extra={n}" for n in game.get("base_extra", [])]
     if "screen_variants" in game:
         build_args += ["--screen-variants", game["screen_variants"]]
+    build_args += [f"--rpy-extra={d}" for d in game.get("rpy_extra", [])]
     if vpk:
         build_args += ["--vpk", root / f"{title_id}.vpk"]
 

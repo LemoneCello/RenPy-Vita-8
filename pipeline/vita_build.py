@@ -19,6 +19,7 @@ should be on the Vita, and optionally a VPK of it. Later sources win:
   8. --compiled       compiled-script overlay (vita_story.py), .rpyc included
   9. rpy/             compatibility scripts, into game/; also rpy/py2/ for a
                       game whose compiled scripts hold Python 2 code
+     --rpy-extra      game-specific hooks (pipeline/games/<game>/), after rpy/
  10. --base           files of the PC release next to game/ that the scripts
                       use ("../NAME/...", config.basedir + "/NAME"), plus any
                       --base-extra NAME
@@ -319,6 +320,8 @@ def main(argv):
                     help="game/ overlay, repeatable, applied in order (default build/images/game)")
     ap.add_argument("--compiled", type=Path, help="compiled-script overlay for game/, .rpyc kept (vita_story.py output)")
     ap.add_argument("--rpy", type=Path, default=HERE / "rpy", help="compatibility scripts for game/")
+    ap.add_argument("--rpy-extra", type=Path, action="append", default=[], metavar="DIR",
+                    help="a folder of game-specific hooks (.rpy) for game/, added after rpy/ (repeatable)")
     ap.add_argument("--screen-variants", metavar="NAMES",
                     help="screen variants for Ren'Py instead of the port's 'vita small phone touch mobile', "
                          "e.g. 'vita large pc' (written to vita_variants.txt)")
@@ -371,6 +374,10 @@ def main(argv):
     if scripts_python(args.game) == 2:
         print("The game's scripts hold Python 2 code: adding rpy/py2/")
         mirror.add_tree(args.rpy / "py2", "game/", "rpy/py2/", "*.rpy", recursive=False)
+    for extra in args.rpy_extra:
+        if not extra.is_dir():
+            sys.exit(f"--rpy-extra {extra}: not a folder")
+        mirror.add_tree(extra, "game/", f"rpy extra {extra}", "*.rpy", recursive=False)
     if args.base:
         names = sorted(set(base_files(args.base, args.game)) | set(args.base_extra))
         for name in names:

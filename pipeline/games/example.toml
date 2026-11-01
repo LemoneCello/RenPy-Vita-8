@@ -25,6 +25,8 @@ renpy = "MyGame-1.0-pc"           # the PC release (its Ren'Py runs vita_story.p
 # background art (or the game's menu art) with a progress bar.
 # presplash_background = "loading.png"
 # presplash_foreground = "loading_full.png"
+# rpy_extra = ["RenPy-Vita-8/pipeline/games/mygame"]  # game-specific hooks (.rpy), added
+                                  # after the generic ones in rpy/
 # screen_variants = "vita large pc"  # Ren'Py's layout variants; default "vita small phone touch
                                   # mobile" (the phone layout). For a game whose phone layout
                                   # doesn't fit its own GUI (text outside its text box...)
