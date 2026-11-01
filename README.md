@@ -1,5 +1,7 @@
 # RenPy-Vita-8: Ren'Py → PS Vita pipeline
 
+> **Work in progress.** This has been tried on two games so far, and only one of them runs from start to finish on the Vita. Expect other games to need fixes: settings, hooks, or changes to the pipeline itself. Reports of what works and what doesn't are welcome.
+
 This fork of [Grimiku's RenPy-Vita-8](https://github.com/Grimiku/RenPy-Vita-8) adds a pipeline that turns a Ren'Py game's PC release into a complete PS Vita app (a VPK), and makes the game run well on the Vita.
 
 It has two parts:

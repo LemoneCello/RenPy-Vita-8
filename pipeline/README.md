@@ -1,11 +1,13 @@
 # Ren'Py → PS Vita pipeline
 
+> **Work in progress.** This has been tried on two games so far, and only one of them runs from start to finish on the Vita. Expect other games to need fixes: settings, hooks, or changes to the pipeline itself. Reports of what works and what doesn't are welcome.
+
 Turns a Ren'Py game's PC release into a PS Vita app for this port (RenPy-Vita-8, PVR build), and makes it run well. Each step is a separate script; one command runs them all. The fixes are meant to be generic. Tested on:
 
 - **Eternum 0.9.5** (Ren'Py 8.3, 1920×1080; "the test game" in older code comments and commits): about 140,000 script statements, 13,000 images and 449 movies. The figures below are for this game.
-- **Doki Doki Literature Club! 1.1.1** (Ren'Py 6.99, Python 2, 1280×720, compiled scripts only): in progress. The pipeline builds it; the Python 2 fixes it needs on the Vita are being worked on.
+- **Doki Doki Literature Club! 1.1.1** (Ren'Py 6.99, Python 2, 1280×720, compiled scripts only): in progress. Acts 1 and 2 play through on the Vita (boot about 18 s); act 3's animated window masks crash the Vita's GPU, which is being worked on.
 
-On the Vita, that game boots in about 35 s and dialogue advances in about 100 ms. Its 60 fps movies play on the Vita's hardware decoder, including two at once.
+On the Vita, Eternum boots in about 35 s and dialogue advances in about 100 ms. Its 60 fps movies play on the Vita's hardware decoder, including two at once.
 
 **Game files:** the pipeline extracts, converts and repacks the game's own assets. Only use it on games you own, for your own use, and don't distribute what it produces.
 
